@@ -4,7 +4,7 @@
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>CountPlus</title>
-    <link rel="stylesheet" href="./styles.css?v=mobile-ui-28">
+    <link rel="stylesheet" href="./styles.css?v=mobile-ui-33">
   </head>
   <body>
     <main class="app">
@@ -65,7 +65,7 @@
           </label>
           <label>
             <span>预算数</span>
-            <input id="budgetAmount" type="number" min="0" placeholder="可空">
+            <input id="budgetAmount" type="number" min="1" placeholder="请输入预算" required>
           </label>
           <label>
             <span>预算区间</span>
@@ -73,7 +73,7 @@
           </label>
           <label>
             <span>分割符</span>
-            <input id="separators" type="text" value="-/." maxlength="12">
+            <input id="separators" type="text" value="-/.，*。~" maxlength="12">
           </label>
           <label>
             <span>赔率</span>
@@ -127,9 +127,7 @@
               <p><span id="candidateText">可用号码 0 个</span><span class="logic-note">先生成分组，再统计每个号码分配</span></p>
             </div>
             <div class="result-actions">
-              <button id="singleBtn" class="primary">单导出</button>
               <button id="multiBtn" class="primary">多导出</button>
-              <button id="openDataBtn">打开数据</button>
               <button id="copyBtn">复制数据</button>
               <button id="clearBtn">清除</button>
             </div>
@@ -146,6 +144,6 @@
       </section>
     </main>
 
-    <script src="./app.js?v=mobile-ui-27"></script>
+    <script src="./app.js?v=mobile-ui-44"></script>
   </body>
 </html>

@@ -44,6 +44,7 @@ const state = {
   selectedNumbers: new Set(),
   lastPlan: null,
   autoRandomSelection: false,
+  multiExportCount: 0,
 };
 
 const els = {};
@@ -664,6 +665,17 @@ function updateStats(plan = null) {
 
 function setNotice(text) {
   els.noticeText.textContent = text;
+}
+
+function updateExportCountText() {
+  if (!els.exportCountText) return;
+  els.exportCountText.textContent = `多导出: ${state.multiExportCount}次`;
+}
+
+function incrementMultiExportCount() {
+  state.multiExportCount += 1;
+  updateExportCountText();
+  saveState();
 }
 
 function currentGroupCount() {
@@ -1742,6 +1754,7 @@ function saveState() {
   const data = {
     separators: els.separators.value,
     oddsAmount: els.oddsAmount.value,
+    multiExportCount: state.multiExportCount,
   };
   localStorage.setItem(STORAGE_KEY, JSON.stringify(data));
 }
@@ -1754,9 +1767,11 @@ function restoreState() {
     ["separators", "oddsAmount"].forEach((key) => {
       if (data[key] !== undefined && els[key]) els[key].value = data[key];
     });
+    state.multiExportCount = Math.max(0, Number(data.multiExportCount) || 0);
   } catch {
     localStorage.removeItem(STORAGE_KEY);
   }
+  updateExportCountText();
 }
 
 function setCheckedValues(name, values) {
@@ -1801,6 +1816,7 @@ function bindEvents() {
     const plan = canReuseCurrentPlan(state.lastPlan) ? state.lastPlan : makeOptimizedBettingPlan();
     if (!plan) return;
     applyGeneratedPlan(plan, true);
+    incrementMultiExportCount();
   });
 
   els.copyBtn.addEventListener("click", async () => {
@@ -1877,6 +1893,7 @@ function collectElements() {
     "dataPanel",
     "totalText",
     "rangeText",
+    "exportCountText",
     "noticeText",
     "resetAll",
   ].forEach((id) => {
@@ -1891,6 +1908,7 @@ function init() {
   renderNumberGrid();
   bindEvents();
   updateStats();
+  updateExportCountText();
 }
 
 init();

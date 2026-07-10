@@ -1142,6 +1142,32 @@ function tierLinesFromAllocations(tiers, allocations, prefixes, desiredCount) {
   return normalizeTierLineCount(lines, desiredCount, prefixes);
 }
 
+function compactTierLinesFromTargets(tiers, targets, desiredCount, prefixes) {
+  const lines = [];
+
+  tiers.forEach((tier) => {
+    const byAmount = new Map();
+    tier.numbers.forEach((num) => {
+      const amount = roundedStakeUnit(targets[num] || 0);
+      if (!amount) return;
+      if (!byAmount.has(amount)) byAmount.set(amount, []);
+      byAmount.get(amount).push(num);
+    });
+
+    [...byAmount.entries()]
+      .sort(([amountA], [amountB]) => amountB - amountA)
+      .forEach(([each, numbers]) => {
+        lines.push({
+          tier: tier.key,
+          numbers: numbers.slice().sort((a, b) => a - b),
+          each,
+        });
+      });
+  });
+
+  return normalizeTierLineCount(lines, desiredCount, prefixes);
+}
+
 function tierBudgetFromAllocations(tier, allocations) {
   return tier.numbers.reduce((sum, num) => sum + (allocations[num] || 0), 0);
 }
@@ -1237,6 +1263,28 @@ function classifyOptimizedTiers(candidates, originalAllocations) {
     { key: "second", name: "B档 次攻", title: "原始金额中间约30%", numbers: second },
     { key: "defense", name: "C档 防守", title: "原始金额较低约50%", numbers: defense },
   ].map((tier) => ({ ...tier, tierByNumber }));
+}
+
+function classifyManualOptimizedTiers(candidates) {
+  const main = selectedManualNumbers("mainAttackNumbers", candidates);
+  const mainSet = new Set(main);
+  const second = selectedManualNumbers("secondAttackNumbers", candidates, mainSet);
+  if (!main.length && !second.length) return null;
+
+  const reserved = new Set([...main, ...second]);
+  const defense = candidates.filter((num) => !reserved.has(num));
+  const tierByNumber = new Map();
+  const tiers = [
+    { key: "main", name: "A档 主攻", title: "手动主攻", numbers: main },
+    { key: "second", name: "B档 次攻", title: "手动次攻", numbers: second },
+    { key: "defense", name: "C档 防守", title: "剩余防守", numbers: defense },
+  ];
+
+  tiers.forEach((tier) => {
+    tier.numbers.forEach((num) => tierByNumber.set(num, tier.key));
+  });
+
+  return tiers.map((tier) => ({ ...tier, tierByNumber }));
 }
 
 function tierWeight(key) {
@@ -1494,10 +1542,13 @@ function makeOptimizedBettingPlan() {
   const prefixes = getCheckedValues("prefix");
   const candidates = basePlan.candidates.slice();
   const originalAllocations = { ...basePlan.allocations };
-  const tiers = classifyOptimizedTiers(candidates, originalAllocations);
+  const manualTiers = classifyManualOptimizedTiers(candidates);
+  const tiers = manualTiers || classifyOptimizedTiers(candidates, originalAllocations);
   const tierByNumber = tiers[0]?.tierByNumber || new Map();
   const targetPlan = makeOptimizedTargets(candidates, tiers, originalAllocations, total, odds);
-  const lines = seedOptimizedLines(basePlan.lines, targetPlan.targets);
+  const lines = manualTiers
+    ? compactTierLinesFromTargets(tiers, targetPlan.targets, currentGroupCount(), prefixes)
+    : seedOptimizedLines(basePlan.lines, targetPlan.targets);
 
   adjustOptimizedTotal(lines, candidates, total, tierByNumber, targetPlan.safeMinimum);
   ensureOptimizedProfit(lines, candidates, total, odds, tierByNumber);
@@ -1506,7 +1557,7 @@ function makeOptimizedBettingPlan() {
 
   const allocations = applyLineAllocations(lines, candidates);
   const actualTotal = planTotalFromLines(lines);
-  const finalTiers = classifyOptimizedTiers(candidates, allocations);
+  const finalTiers = manualTiers || classifyOptimizedTiers(candidates, allocations);
   const finalCheck = optimizedFinalCheck(candidates, allocations, actualTotal, odds, finalTiers);
   const summaries = finalTiers.map((tier) => {
     const netRange = netRangeFor(tier.numbers, allocations, actualTotal, odds);

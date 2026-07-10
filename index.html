@@ -4,7 +4,7 @@
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>CountPlus</title>
-    <link rel="stylesheet" href="./styles.css?v=mobile-ui-33">
+    <link rel="stylesheet" href="./styles.css?v=mobile-ui-34">
   </head>
   <body>
     <main class="app">
@@ -45,6 +45,7 @@
               <input id="defenseNumbers" type="text" inputmode="numeric" placeholder="自动填入剩余号码" readonly>
               <output id="defenseStatus"></output>
             </label>
+            <div id="manualProfitPanel" class="manual-profit-panel" aria-live="polite"></div>
           </div>
         </section>
       </aside>
@@ -128,6 +129,7 @@
             </div>
             <div class="result-actions">
               <button id="multiBtn" class="primary">多导出</button>
+              <button id="profitBtn" hidden>计算利润</button>
               <button id="copyBtn">复制数据</button>
               <button id="clearBtn">清除</button>
             </div>
@@ -138,13 +140,13 @@
           <div class="status">
             <span id="totalText">总分配: 0</span>
             <span id="rangeText">区间最大: 0 ｜ 区间最小: 0</span>
-            <span id="exportCountText">多导出: 0次</span>
+            <span id="usageCountText">累计使用次数：0次</span>
             <span id="noticeText"></span>
           </div>
         </section>
       </section>
     </main>
 
-    <script src="./app.js?v=mobile-ui-46"></script>
+    <script src="./app.js?v=mobile-ui-49"></script>
   </body>
 </html>

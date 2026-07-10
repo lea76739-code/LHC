@@ -26,9 +26,9 @@ const DEFAULT_GROUP_COUNT = 10;
 const DEFAULT_SEPARATORS = "-/.，*。~";
 const STORAGE_KEY = "countplus-state-v9";
 const MANUAL_GROUPS = [
-  { input: "mainAttackNumbers", status: "mainAttackStatus", className: "role-main", label: "主" },
-  { input: "secondAttackNumbers", status: "secondAttackStatus", className: "role-second", label: "次" },
-  { input: "defenseNumbers", status: "defenseStatus", className: "role-defense", label: "防" },
+  { input: "mainAttackNumbers", status: "mainAttackStatus", className: "role-main", label: "主", title: "主攻" },
+  { input: "secondAttackNumbers", status: "secondAttackStatus", className: "role-second", label: "次", title: "次攻" },
+  { input: "defenseNumbers", status: "defenseStatus", className: "role-defense", label: "防", title: "防守" },
 ];
 const TIER_BASE_BUDGET = 10000;
 const STAKE_UNIT = 10;
@@ -44,7 +44,9 @@ const state = {
   selectedNumbers: new Set(),
   lastPlan: null,
   autoRandomSelection: false,
-  multiExportCount: 0,
+  usageCount: 0,
+  hasGeneratedOutput: false,
+  profitVisible: false,
 };
 
 const els = {};
@@ -586,6 +588,51 @@ function generatePlan(count) {
   return null;
 }
 
+function renderManualProfitPanel(plan, force = false) {
+  if (!els.manualProfitPanel) return;
+
+  if (!state.selectedNumbers.size) {
+    els.manualProfitPanel.innerHTML = `<span class="profit-empty">选择号码后显示中奖利润</span>`;
+    return;
+  }
+
+  if (!force) {
+    els.manualProfitPanel.innerHTML = state.hasGeneratedOutput
+      ? `<span class="profit-empty">点击“计算利润”查看每个号码中奖利润</span>`
+      : `<span class="profit-empty">生成结果后可计算中奖利润</span>`;
+    return;
+  }
+
+  if (!plan || !plan.candidates?.length) {
+    els.manualProfitPanel.innerHTML = `<span class="profit-empty">生成分配后显示每个号码中奖利润</span>`;
+    return;
+  }
+
+  const total = actualPlanTotal(plan);
+  const odds = currentOdds();
+  const candidateSet = new Set(plan.candidates);
+
+  els.manualProfitPanel.innerHTML = MANUAL_GROUPS.map((group) => {
+    const numbers = parseNumbers(els[group.input].value).filter((num) => candidateSet.has(num));
+    const chips = numbers
+      .map((num) => {
+        const amount = plan.allocations[num] || 0;
+        const profit = amount * odds - total;
+        const sign = profit >= 0 ? "+" : "";
+        const className = profit >= 0 ? "profit-chip" : "profit-chip loss";
+        return `<span class="${className}"><b>${twoDigit(num)}</b>${sign}${moneyText(profit)}</span>`;
+      })
+      .join("");
+
+    return `
+      <div class="manual-profit-section">
+        <strong>${group.title}</strong>
+        <div class="profit-chips">${chips || `<span class="profit-empty">暂无号码</span>`}</div>
+      </div>
+    `;
+  }).join("");
+}
+
 function updateStats(plan = null) {
   syncDefenseNumbers();
   const candidates = activeCandidates();
@@ -641,6 +688,7 @@ function updateStats(plan = null) {
     els.totalText.textContent = "总分配: 0";
     els.rangeText.textContent = "区间最大: 0 ｜ 区间最小: 0";
   }
+  renderManualProfitPanel(plan, state.profitVisible);
   renderAllocationPanel(plan);
 }
 
@@ -648,15 +696,27 @@ function setNotice(text) {
   els.noticeText.textContent = text;
 }
 
-function updateExportCountText() {
-  if (!els.exportCountText) return;
-  els.exportCountText.textContent = `多导出: ${state.multiExportCount}次`;
+function updateUsageCountText() {
+  if (!els.usageCountText) return;
+  els.usageCountText.textContent = `累计使用次数：${state.usageCount}次`;
 }
 
-function incrementMultiExportCount() {
-  state.multiExportCount += 1;
-  updateExportCountText();
+function incrementUsageCount() {
+  state.usageCount += 1;
+  updateUsageCountText();
   saveState();
+}
+
+function updateProfitButton() {
+  if (!els.profitBtn) return;
+  els.profitBtn.hidden = !state.hasGeneratedOutput;
+  els.profitBtn.disabled = !state.hasGeneratedOutput || !state.lastPlan;
+}
+
+function resetProfitState() {
+  state.profitVisible = false;
+  state.hasGeneratedOutput = false;
+  updateProfitButton();
 }
 
 function currentGroupCount() {
@@ -670,6 +730,7 @@ function hasBudgetAmount() {
 function requireBudgetAmount() {
   if (hasBudgetAmount()) return true;
   state.lastPlan = null;
+  resetProfitState();
   els.resultOutput.value = "";
   setNotice("预算不可空，请先输入你的预算");
   updateStats();
@@ -1551,7 +1612,12 @@ function tierPlanNotice(plan) {
 
 function applyGeneratedPlan(plan, writeOutput = true) {
   state.lastPlan = plan;
-  if (writeOutput) els.resultOutput.value = planText(plan);
+  if (writeOutput) {
+    els.resultOutput.value = planText(plan);
+    state.hasGeneratedOutput = true;
+    state.profitVisible = false;
+  }
+  updateProfitButton();
   updateStats(plan);
   setNotice(tierPlanNotice(plan));
   if (els.dataPanel && !els.dataPanel.hidden) renderDataPanel(plan);
@@ -1572,6 +1638,7 @@ function scheduleAutoPreview() {
 function refreshAfterChange() {
   clearTimeout(autoPreviewTimer);
   state.lastPlan = null;
+  resetProfitState();
   if (els.dataPanel) els.dataPanel.hidden = true;
   els.resultOutput.value = "";
   setNotice("");
@@ -1735,7 +1802,7 @@ function saveState() {
   const data = {
     separators: els.separators.value,
     oddsAmount: els.oddsAmount.value,
-    multiExportCount: state.multiExportCount,
+    usageCount: state.usageCount,
   };
   localStorage.setItem(STORAGE_KEY, JSON.stringify(data));
 }
@@ -1748,11 +1815,11 @@ function restoreState() {
     ["separators", "oddsAmount"].forEach((key) => {
       if (data[key] !== undefined && els[key]) els[key].value = data[key];
     });
-    state.multiExportCount = Math.max(0, Number(data.multiExportCount) || 0);
+    state.usageCount = Math.max(0, Number(data.usageCount ?? data.multiExportCount) || 0);
   } catch {
     localStorage.removeItem(STORAGE_KEY);
   }
-  updateExportCountText();
+  updateUsageCountText();
 }
 
 function setCheckedValues(name, values) {
@@ -1797,7 +1864,15 @@ function bindEvents() {
     const plan = canReuseCurrentPlan(state.lastPlan) ? state.lastPlan : makeOptimizedBettingPlan();
     if (!plan) return;
     applyGeneratedPlan(plan, true);
-    incrementMultiExportCount();
+  });
+
+  els.profitBtn.addEventListener("click", () => {
+    if (!state.lastPlan || !state.hasGeneratedOutput) {
+      setNotice("请先点击多导出生成结果");
+      return;
+    }
+    state.profitVisible = true;
+    renderManualProfitPanel(state.lastPlan, true);
   });
 
   els.copyBtn.addEventListener("click", async () => {
@@ -1819,6 +1894,7 @@ function bindEvents() {
   els.clearBtn.addEventListener("click", () => {
     els.resultOutput.value = "";
     state.lastPlan = null;
+    resetProfitState();
     if (els.dataPanel) els.dataPanel.hidden = true;
     setNotice("");
     updateStats();
@@ -1867,14 +1943,16 @@ function collectElements() {
     "prefixGrid",
     "candidateText",
     "multiBtn",
+    "profitBtn",
     "copyBtn",
     "clearBtn",
     "resultOutput",
     "allocationPanel",
     "dataPanel",
+    "manualProfitPanel",
     "totalText",
     "rangeText",
-    "exportCountText",
+    "usageCountText",
     "noticeText",
     "resetAll",
   ].forEach((id) => {
@@ -1886,10 +1964,12 @@ function init() {
   collectElements();
   renderChecks();
   restoreState();
+  incrementUsageCount();
   renderNumberGrid();
   bindEvents();
+  updateProfitButton();
   updateStats();
-  updateExportCountText();
+  updateUsageCountText();
 }
 
 init();

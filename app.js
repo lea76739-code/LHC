@@ -335,6 +335,10 @@ function compactLineText(line, prefix = "", suffix = "") {
   return `${tag}${numberText} 各${moneyText(line.each)}${suffix}`;
 }
 
+function currentGroupPrefix() {
+  return getCheckedValues("prefix")[0] || PREFIXES[0] || "";
+}
+
 function shuffledItems(items) {
   const output = items.slice();
   for (let index = output.length - 1; index > 0; index -= 1) {
@@ -361,17 +365,62 @@ function orderLinesByDifferentAmounts(lines) {
   return output;
 }
 
-function groupedLinesText(lines) {
+function randomBlockSizes(count) {
+  return Array.from({ length: count }, () => randInt(1, 5));
+}
+
+function blockSizesTotal(sizes) {
+  return sizes.reduce((sum, size) => sum + size, 0);
+}
+
+function outputLineCountForGroups(count) {
+  return blockSizesTotal(randomBlockSizes(count));
+}
+
+function normalizeBlockSizes(lineCount, groupCount, preferredSizes = null) {
+  const count = Math.max(1, Math.min(groupCount, lineCount));
+  const sizes = preferredSizes?.length === count
+    ? preferredSizes.slice()
+    : randomBlockSizes(count);
+
+  let total = blockSizesTotal(sizes);
+  while (total < lineCount) {
+    const index = sizes
+      .map((size, sizeIndex) => ({ size, sizeIndex }))
+      .filter(({ size }) => size < 5)
+      .sort((left, right) => left.size - right.size || left.sizeIndex - right.sizeIndex)[0]?.sizeIndex;
+    if (index === undefined) break;
+    sizes[index] += 1;
+    total += 1;
+  }
+
+  while (total > lineCount) {
+    const index = sizes
+      .map((size, sizeIndex) => ({ size, sizeIndex }))
+      .filter(({ size }) => size > 1)
+      .sort((left, right) => right.size - left.size || left.sizeIndex - right.sizeIndex)[0]?.sizeIndex;
+    if (index === undefined) break;
+    sizes[index] -= 1;
+    total -= 1;
+  }
+
+  return sizes.filter((size) => size > 0);
+}
+
+function groupedLinesText(lines, preferredBlockSizes = null) {
   const output = [];
   const orderedLines = orderLinesByDifferentAmounts(lines);
-  for (let index = 0; index < orderedLines.length;) {
-    const blockSize = Math.min(orderedLines.length - index, randInt(1, 5));
+  const groupPrefix = currentGroupPrefix();
+  const blockSizes = normalizeBlockSizes(orderedLines.length, preferredBlockSizes?.length || currentGroupCount(), preferredBlockSizes);
+
+  for (let index = 0, blockIndex = 0; index < orderedLines.length && blockIndex < blockSizes.length; blockIndex += 1) {
+    const blockSize = Math.min(orderedLines.length - index, blockSizes[blockIndex]);
     const block = orderedLines.slice(index, index + blockSize);
     const blockTotal = block.reduce((sum, line) => sum + line.numbers.length * line.each, 0);
 
-    block.forEach((line, blockIndex) => {
-      const prefix = blockIndex === 0 ? line.prefix || "" : "";
-      const suffix = blockIndex === block.length - 1 ? `  总${moneyText(blockTotal)}` : "";
+    block.forEach((line, lineIndex) => {
+      const prefix = lineIndex === 0 ? groupPrefix : "";
+      const suffix = lineIndex === block.length - 1 ? `  总${moneyText(blockTotal)}` : "";
       output.push(compactLineText(line, prefix, suffix));
     });
 
@@ -1533,7 +1582,9 @@ function optimizedFinalCheck(candidates, allocations, total, odds, tiers) {
 }
 
 function makeOptimizedBettingPlan() {
-  const basePlan = generatePlan(currentGroupCount());
+  const outputGroupCount = currentGroupCount();
+  const outputBlockSizes = randomBlockSizes(outputGroupCount);
+  const basePlan = generatePlan(blockSizesTotal(outputBlockSizes));
   if (!basePlan) return null;
 
   const total = currentBudget();
@@ -1578,6 +1629,8 @@ function makeOptimizedBettingPlan() {
     odds,
     tiers: summaries,
     limits: null,
+    outputGroupCount,
+    outputBlockSizes,
     optimization: {
       ...targetPlan,
       finalCheck,
@@ -1682,7 +1735,7 @@ function renderGroupSummary(plan) {
 }
 
 function planText(plan) {
-  return groupedLinesText(plan.lines);
+  return groupedLinesText(plan.lines, plan.outputBlockSizes);
 }
 
 function tierPlanNotice(plan) {

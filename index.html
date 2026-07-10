@@ -4,7 +4,7 @@
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>CountPlus</title>
-    <link rel="stylesheet" href="./styles.css?v=mobile-ui-36">
+    <link rel="stylesheet" href="./styles.css?v=mobile-ui-40">
   </head>
   <body>
     <main class="app">
@@ -32,17 +32,17 @@
           <div class="manual-groups">
             <label class="manual-row">
               <span>主攻：</span>
-              <input id="mainAttackNumbers" type="text" inputmode="numeric" placeholder="01.02.03">
+              <input id="mainAttackNumbers" type="text" inputmode="numeric">
               <output id="mainAttackStatus"></output>
             </label>
             <label class="manual-row">
               <span>次攻：</span>
-              <input id="secondAttackNumbers" type="text" inputmode="numeric" placeholder="04.05.06">
+              <input id="secondAttackNumbers" type="text" inputmode="numeric">
               <output id="secondAttackStatus"></output>
             </label>
             <label class="manual-row">
               <span>防守：</span>
-              <input id="defenseNumbers" type="text" inputmode="numeric" placeholder="自动填入剩余号码" readonly>
+              <input id="defenseNumbers" type="text" inputmode="numeric" readonly>
               <output id="defenseStatus"></output>
             </label>
             <div id="manualProfitPanel" class="manual-profit-panel" aria-live="polite"></div>
@@ -54,23 +54,23 @@
         <div class="toolbar">
           <label class="hidden-pick-control">
             <span>最少位数</span>
-            <input id="minPickCount" type="number" min="1" max="49" placeholder="5">
+            <input id="minPickCount" type="number" min="1" max="49">
           </label>
           <label class="hidden-pick-control">
             <span>最多位数</span>
-            <input id="pickCount" type="number" min="1" max="49" placeholder="15">
+            <input id="pickCount" type="number" min="1" max="49">
           </label>
           <label>
             <span>分组数</span>
-            <input id="groupCount" type="number" min="1" placeholder="10">
+            <input id="groupCount" type="number" min="1">
           </label>
           <label>
             <span>预算数</span>
-            <input id="budgetAmount" type="number" min="1" placeholder="请输入预算" required>
+            <input id="budgetAmount" type="number" min="1" required>
           </label>
           <label>
             <span>预算区间</span>
-            <input id="budgetRange" type="number" min="0" placeholder="0">
+            <input id="budgetRange" type="number" min="0">
           </label>
           <label>
             <span>分割符</span>
@@ -92,14 +92,14 @@
             <div class="filter-band filter-inputs">
               <label>
                 <span>头数</span>
-                <input id="headDigits" type="text" placeholder="0.1.2.3.4">
+                <input id="headDigits" type="text">
               </label>
             </div>
 
             <div class="filter-band filter-inputs">
               <label>
                 <span>尾数</span>
-                <input id="tailDigits" type="text" placeholder="0.1.2.3.4.5.6.7.8.9">
+                <input id="tailDigits" type="text">
               </label>
             </div>
           </div>
@@ -136,7 +136,7 @@
             </div>
           </div>
           <div id="allocationPanel" class="allocation-panel" hidden></div>
-          <textarea id="resultOutput" spellcheck="false" placeholder="生成结果会显示在这里"></textarea>
+          <textarea id="resultOutput" spellcheck="false"></textarea>
           <div id="dataPanel" class="data-panel" hidden></div>
           <div class="status">
             <span id="totalText">总分配: 0</span>
@@ -148,6 +148,6 @@
       </section>
     </main>
 
-    <script src="./app.js?v=mobile-ui-57"></script>
+    <script src="./app.js?v=mobile-ui-59"></script>
   </body>
 </html>

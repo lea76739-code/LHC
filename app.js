@@ -19,7 +19,7 @@ const WAVE_MAP = {
   "绿波": [5, 6, 11, 16, 17, 21, 22, 27, 28, 32, 33, 38, 39, 43, 44, 49],
 };
 
-const PREFIXES = ["新奥", "新奥门", "新奥彩", "香港"];
+const PREFIXES = ["新奥", "新澳门", "新奥彩", "香港"];
 const DEFAULT_MIN_PICK = 5;
 const DEFAULT_MAX_PICK = 15;
 const DEFAULT_GROUP_COUNT = 10;
@@ -362,29 +362,10 @@ function orderLinesByDifferentAmounts(lines) {
 function groupedLinesText(lines) {
   const output = [];
   const orderedLines = orderLinesByDifferentAmounts(lines);
-  let index = 0;
-
-  while (index < orderedLines.length) {
-    const targetSize = Math.min(randInt(1, 5), orderedLines.length - index);
-    const chunk = [];
-    const usedAmounts = new Set();
-
-    while (index < orderedLines.length && chunk.length < targetSize) {
-      const line = orderedLines[index];
-      if (chunk.length && usedAmounts.has(line.each)) break;
-      chunk.push(line);
-      usedAmounts.add(line.each);
-      index += 1;
-    }
-
-    const chunkTotal = chunk.reduce((sum, line) => sum + line.numbers.length * line.each, 0);
-
-    chunk.forEach((line, lineIndex) => {
-      const prefix = lineIndex === 0 ? line.prefix || "" : "";
-      const suffix = lineIndex === chunk.length - 1 ? `  总${moneyText(chunkTotal)}` : "";
-      output.push(compactLineText(line, prefix, suffix));
-    });
-  }
+  orderedLines.forEach((line) => {
+    const lineTotal = line.numbers.length * line.each;
+    output.push(compactLineText(line, line.prefix || "", `  总${moneyText(lineTotal)}`));
+  });
 
   return output.join("\n");
 }

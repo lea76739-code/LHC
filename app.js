@@ -364,10 +364,19 @@ function orderLinesByDifferentAmounts(lines) {
 function groupedLinesText(lines) {
   const output = [];
   const orderedLines = orderLinesByDifferentAmounts(lines);
-  orderedLines.forEach((line) => {
-    const lineTotal = line.numbers.length * line.each;
-    output.push(compactLineText(line, line.prefix || "", `  总${moneyText(lineTotal)}`));
-  });
+  for (let index = 0; index < orderedLines.length;) {
+    const blockSize = Math.min(orderedLines.length - index, randInt(1, 5));
+    const block = orderedLines.slice(index, index + blockSize);
+    const blockTotal = block.reduce((sum, line) => sum + line.numbers.length * line.each, 0);
+
+    block.forEach((line, blockIndex) => {
+      const prefix = blockIndex === 0 ? line.prefix || "" : "";
+      const suffix = blockIndex === block.length - 1 ? `  总${moneyText(blockTotal)}` : "";
+      output.push(compactLineText(line, prefix, suffix));
+    });
+
+    index += blockSize;
+  }
 
   return output.join("\n");
 }
@@ -1225,7 +1234,7 @@ function optimizationTolerance(total) {
 }
 
 function totalOverageTolerance(total) {
-  return Math.max(optimizationTolerance(total), Math.round(total * 0.03));
+  return 300;
 }
 
 function totalBudgetMiss(currentTotal, targetTotal) {

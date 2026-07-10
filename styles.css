@@ -422,11 +422,120 @@ textarea:focus {
   font-weight: 700;
 }
 
+.manual-profit-panel {
+  display: grid;
+  gap: 7px;
+  padding: 8px;
+  border: 1px solid #dde8f3;
+  border-radius: 8px;
+  background: #f7fbff;
+}
+
+.manual-profit-section {
+  display: grid;
+  grid-template-columns: 50px minmax(0, 1fr);
+  gap: 6px 8px;
+  align-items: start;
+}
+
+.manual-profit-section > strong {
+  color: var(--text);
+  font-size: 12px;
+  line-height: 24px;
+}
+
+.profit-chips {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(118px, 1fr));
+  gap: 6px;
+  min-width: 0;
+}
+
+.profit-chip {
+  display: grid;
+  grid-template-columns: 34px minmax(0, 1fr);
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  min-height: 44px;
+  padding: 5px 7px;
+  border: 1px solid rgba(13, 107, 95, 0.24);
+  border-radius: 7px;
+  background: #fff;
+  color: #0d6b5f;
+  font-size: 11px;
+  font-weight: 800;
+  overflow: hidden;
+}
+
+.profit-num {
+  display: grid;
+  place-items: center;
+  min-width: 0;
+  height: 30px;
+  border-radius: 6px;
+  background: #eef7f5;
+  color: #172033;
+  font-size: 15px;
+  line-height: 1;
+}
+
+.profit-values {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+
+.profit-amount,
+.profit-net {
+  display: block;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.profit-amount {
+  color: #536276;
+  font-size: 10px;
+  font-weight: 700;
+}
+
+.profit-net {
+  color: #0d6b5f;
+  font-size: 12px;
+  font-style: normal;
+  font-weight: 900;
+}
+
+.profit-chip.loss {
+  border-color: rgba(185, 28, 28, 0.24);
+  color: #b91c1c;
+}
+
+.profit-chip.loss .profit-num {
+  background: #fff1f2;
+}
+
+.profit-chip.loss .profit-net {
+  color: #b91c1c;
+}
+
+.profit-empty {
+  color: var(--muted);
+  font-size: 11px;
+  line-height: 24px;
+}
+
 .toolbar {
   display: grid;
-  grid-template-columns: repeat(7, minmax(96px, 1fr));
+  grid-template-columns: repeat(5, minmax(112px, 1fr));
   gap: 10px;
   padding: 12px;
+}
+
+.hidden-pick-control {
+  display: none !important;
 }
 
 .toolbar label,
@@ -1017,7 +1126,25 @@ textarea {
   }
 
   .allocation-grid {
-    grid-template-columns: repeat(4, minmax(0, 1fr));
+    grid-template-columns: repeat(auto-fit, minmax(76px, 1fr));
+  }
+
+  .manual-profit-section {
+    grid-template-columns: 42px minmax(0, 1fr);
+  }
+
+  .profit-chips {
+    grid-template-columns: repeat(auto-fit, minmax(112px, 1fr));
+  }
+
+  .profit-chip {
+    grid-template-columns: 30px minmax(0, 1fr);
+    padding: 5px;
+  }
+
+  .profit-num {
+    height: 28px;
+    font-size: 14px;
   }
 
   .tier-summary {

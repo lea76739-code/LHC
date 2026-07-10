@@ -620,7 +620,15 @@ function renderManualProfitPanel(plan, force = false) {
         const profit = amount * odds - total;
         const sign = profit >= 0 ? "+" : "";
         const className = profit >= 0 ? "profit-chip" : "profit-chip loss";
-        return `<span class="${className}"><b>${twoDigit(num)}</b>${sign}${moneyText(profit)}</span>`;
+        return `
+          <span class="${className}">
+            <b class="profit-num">${twoDigit(num)}</b>
+            <span class="profit-values">
+              <span class="profit-amount">投 ${moneyText(amount)}</span>
+              <em class="profit-net">利 ${sign}${moneyText(profit)}</em>
+            </span>
+          </span>
+        `;
       })
       .join("");
 

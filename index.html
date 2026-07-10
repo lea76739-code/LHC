@@ -4,20 +4,11 @@
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>CountPlus</title>
-    <link rel="stylesheet" href="./styles.css?v=mobile-ui-40">
+    <link rel="stylesheet" href="./styles.css?v=notice-marquee-45">
   </head>
   <body>
     <main class="app">
       <aside class="side">
-        <div class="brand">
-          <div>
-            <h1>CountPlus</h1>
-            <p>2026 生肖牌增强版</p>
-          </div>
-          <span class="version-badge">原版分配逻辑</span>
-          <button id="resetAll" class="icon-btn" title="恢复默认">↺</button>
-        </div>
-
         <section class="panel">
           <div class="section-head">
             <h2>号码</h2>
@@ -27,6 +18,7 @@
             <button id="selectAll">全选</button>
             <button id="selectNone">全不选</button>
             <button id="invertSelect">反选</button>
+            <button id="resetAll" class="icon-btn" title="恢复默认">↺</button>
           </div>
           <div id="numberGrid" class="number-grid" aria-label="1 到 49 号码选择"></div>
           <div class="manual-groups">
@@ -141,13 +133,26 @@
           <div class="status">
             <span id="totalText">总分配: 0</span>
             <span id="rangeText">区间最大: 0 ｜ 区间最小: 0</span>
-            <span id="usageCountText">累计使用次数：0次</span>
             <span id="noticeText"></span>
           </div>
         </section>
       </section>
     </main>
 
-    <script src="./app.js?v=mobile-ui-59"></script>
+    <div id="randomDialog" class="dialog-backdrop" hidden>
+      <div class="dialog-card" role="dialog" aria-modal="true" aria-labelledby="randomDialogTitle">
+        <h3 id="randomDialogTitle">随机生成</h3>
+        <label>
+          <span>号码数量</span>
+          <input id="randomCountInput" type="text" inputmode="numeric">
+        </label>
+        <div class="dialog-actions">
+          <button id="randomCancelBtn">取消</button>
+          <button id="randomConfirmBtn" class="primary">确定</button>
+        </div>
+      </div>
+    </div>
+
+    <script src="./app.js?v=notice-marquee-90"></script>
   </body>
 </html>

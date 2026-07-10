@@ -39,18 +39,19 @@ const TIER_RULES = {
   main: { min: 400, max: 450, title: "第三档" },
 };
 const TIER_PRIORITY = ["main", "second", "defense"];
+const DISPLAY_MIN_LINE_NUMBERS = 5;
 
 const state = {
   selectedNumbers: new Set(),
   lastPlan: null,
   autoRandomSelection: false,
-  usageCount: 0,
   hasGeneratedOutput: false,
   profitVisible: false,
 };
 
 const els = {};
 let autoPreviewTimer = null;
+let attackPruneTimer = null;
 
 function twoDigit(num) {
   return String(num).padStart(2, "0");
@@ -148,6 +149,66 @@ function formatAttackInput(input, event = null) {
 function finalizeAttackInput(input) {
   const digits = input.value.replace(/\D/g, "").slice(0, 98);
   input.value = (digits.match(/.{1,2}/g) || []).join(".");
+}
+
+function attackInputNumbers(input) {
+  finalizeAttackInput(input);
+  return (input.value.match(/\d{1,2}/g) || [])
+    .map(Number)
+    .filter((num) => Number.isInteger(num));
+}
+
+function attackInputLabel(input) {
+  return input.id === "mainAttackNumbers" ? "主攻" : "次攻";
+}
+
+function pruneMissingAttackNumbers(input = null) {
+  const inputs = input
+    ? [input]
+    : [els.mainAttackNumbers, els.secondAttackNumbers].filter(Boolean);
+  const removedGroups = [];
+
+  inputs.forEach((attackInput) => {
+    const numbers = attackInputNumbers(attackInput);
+    const kept = [];
+    const removed = [];
+
+    numbers.forEach((num) => {
+      if (num >= 1 && num <= 49 && state.selectedNumbers.has(num)) {
+        if (!kept.includes(num)) kept.push(num);
+      } else if (!removed.includes(num)) {
+        removed.push(num);
+      }
+    });
+
+    if (removed.length) {
+      attackInput.value = formatNumbers(kept.sort((a, b) => a - b));
+      removedGroups.push(`${attackInputLabel(attackInput)} ${removed.map(twoDigit).join(".")}`);
+    }
+  });
+
+  return removedGroups;
+}
+
+function pruneMissingAttackNotice(removedGroups) {
+  if (!removedGroups.length) return "";
+  return `已删除未选号码：${removedGroups.join("；")}`;
+}
+
+function attackInputHasCompleteNumber(input) {
+  const digits = input.value.replace(/\D/g, "");
+  return digits.length >= 2 && digits.length % 2 === 0;
+}
+
+function scheduleAttackPrune(input) {
+  clearTimeout(attackPruneTimer);
+  if (!isAttackInput(input) || !attackInputHasCompleteNumber(input)) return;
+  attackPruneTimer = setTimeout(() => {
+    const removedGroups = pruneMissingAttackNumbers(input);
+    if (!removedGroups.length) return;
+    refreshAfterInputChange();
+    setNotice(pruneMissingAttackNotice(removedGroups));
+  }, 520);
 }
 
 function sameNumberList(left, right) {
@@ -319,20 +380,24 @@ function canFinishWithLadder(groups, startIndex, remain, ladder, minStake, maxSt
   return remain >= minTotal && remain <= maxTotal;
 }
 
+function randomAmountSuffix() {
+  return randomItem(["", "", "元", "米"]);
+}
+
 function lineText(numbers, each, prefix, cumulative = null) {
   const separator = randomItem(activeSeparators());
   const numberText = shuffleNumbers(numbers).map(twoDigit).join(separator);
   const total = numbers.length * each;
   const tag = prefix ? `${prefix} ` : "";
   const tail = cumulative === null ? "" : `****   ${cumulative}`;
-  return `${tag}${numberText} 各${each}  总${total}${tail}`;
+  return `${tag}${numberText} 各${each}${randomAmountSuffix()}  总${total}${tail}`;
 }
 
 function compactLineText(line, prefix = "", suffix = "") {
   const separator = randomItem(activeSeparators());
   const numberText = shuffleNumbers(line.numbers).map(twoDigit).join(separator);
   const tag = prefix ? `${prefix} ` : "";
-  return `${tag}${numberText} 各${moneyText(line.each)}${suffix}`;
+  return `${tag}${numberText} 各${moneyText(line.each)}${randomAmountSuffix()}${suffix}`;
 }
 
 function currentGroupPrefix() {
@@ -407,25 +472,92 @@ function normalizeBlockSizes(lineCount, groupCount, preferredSizes = null) {
   return sizes.filter((size) => size > 0);
 }
 
+function takeBestBlockLine(pool, usedEach) {
+  const ranked = pool
+    .map((line, index) => ({
+      line,
+      index,
+      duplicateAmount: usedEach.has(line.each) ? 1 : 0,
+      random: Math.random(),
+    }))
+    .sort(
+      (left, right) =>
+        left.duplicateAmount - right.duplicateAmount ||
+        left.random - right.random
+    );
+  const chosen = ranked[0];
+  if (!chosen) return null;
+  pool.splice(chosen.index, 1);
+  return chosen.line;
+}
+
+function buildDifferentAmountBlocks(lines, blockSizes) {
+  const pool = orderLinesByDifferentAmounts(lines);
+  return blockSizes
+    .map((size) => {
+      const block = [];
+      const usedEach = new Set();
+
+      while (pool.length && block.length < size) {
+        const line = takeBestBlockLine(pool, usedEach);
+        if (!line) break;
+        block.push(line);
+        usedEach.add(line.each);
+      }
+
+      return block;
+    })
+    .filter((block) => block.length);
+}
+
+function displayChunkSizes(total, maxSize) {
+  if (total <= maxSize) return [total];
+  const sizes = [];
+  let remain = total;
+
+  while (remain > maxSize) {
+    let size = maxSize;
+    const rest = remain - size;
+    if (rest > 0 && rest < DISPLAY_MIN_LINE_NUMBERS) {
+      size = Math.max(DISPLAY_MIN_LINE_NUMBERS, remain - DISPLAY_MIN_LINE_NUMBERS);
+    }
+    sizes.push(size);
+    remain -= size;
+  }
+
+  if (remain > 0) sizes.push(remain);
+  return sizes;
+}
+
+function displayLinesForResult(line) {
+  const maxSize = Math.max(DISPLAY_MIN_LINE_NUMBERS, Number(els.pickCount?.value) || DEFAULT_MAX_PICK);
+  const sizes = displayChunkSizes(line.numbers.length, maxSize);
+  let offset = 0;
+
+  return sizes.map((size) => {
+    const numbers = line.numbers.slice(offset, offset + size);
+    offset += size;
+    return { ...line, numbers };
+  });
+}
+
 function groupedLinesText(lines, preferredBlockSizes = null) {
   const output = [];
-  const orderedLines = orderLinesByDifferentAmounts(lines);
   const groupPrefix = currentGroupPrefix();
-  const blockSizes = normalizeBlockSizes(orderedLines.length, preferredBlockSizes?.length || currentGroupCount(), preferredBlockSizes);
+  const blockSizes = normalizeBlockSizes(lines.length, preferredBlockSizes?.length || currentGroupCount(), preferredBlockSizes);
+  const blocks = buildDifferentAmountBlocks(lines, blockSizes);
 
-  for (let index = 0, blockIndex = 0; index < orderedLines.length && blockIndex < blockSizes.length; blockIndex += 1) {
-    const blockSize = Math.min(orderedLines.length - index, blockSizes[blockIndex]);
-    const block = orderedLines.slice(index, index + blockSize);
+  blocks.forEach((block) => {
     const blockTotal = block.reduce((sum, line) => sum + line.numbers.length * line.each, 0);
+    const displayLines = block.flatMap((line) => displayLinesForResult(line));
+    block.length = displayLines.length;
 
-    block.forEach((line, lineIndex) => {
+    displayLines.forEach((line, lineIndex) => {
       const prefix = lineIndex === 0 ? groupPrefix : "";
       const suffix = lineIndex === block.length - 1 ? `  总${moneyText(blockTotal)}` : "";
       output.push(compactLineText(line, prefix, suffix));
     });
-
-    index += blockSize;
-  }
+  });
 
   return output.join("\n");
 }
@@ -762,17 +894,6 @@ function setNotice(text) {
   els.noticeText.textContent = text;
 }
 
-function updateUsageCountText() {
-  if (!els.usageCountText) return;
-  els.usageCountText.textContent = `累计使用次数：${state.usageCount}次`;
-}
-
-function incrementUsageCount() {
-  state.usageCount += 1;
-  updateUsageCountText();
-  saveState();
-}
-
 function updateProfitButton() {
   if (!els.profitBtn) return;
   els.profitBtn.hidden = !state.hasGeneratedOutput;
@@ -902,6 +1023,95 @@ function promptRandomSelection() {
   setNotice(`已随机生成 ${count} 个号码（范围 ${minPick}-${maxPick}）`);
 }
 
+function randomSelectionNow() {
+  const source = randomSourceNumbers();
+  if (!source.length) {
+    setNotice("当前条件没有可随机的号码");
+    return;
+  }
+
+  const currentMin = Math.max(1, Number(els.minPickCount.value) || DEFAULT_MIN_PICK);
+  const currentMax = Math.max(1, Number(els.pickCount.value) || DEFAULT_MAX_PICK);
+  const minPick = Math.min(Math.min(currentMin, currentMax), source.length);
+  const maxPick = Math.min(Math.max(currentMin, currentMax), source.length);
+  const count = randInt(minPick, maxPick);
+  state.selectedNumbers = new Set(sampleUnique(source, count));
+  state.autoRandomSelection = false;
+  refreshAfterChange();
+  setNotice(`已随机生成 ${count} 个号码（范围 ${minPick}-${maxPick}）`);
+}
+
+function promptRandomCountSelection() {
+  const source = randomSourceNumbers();
+  if (!source.length) {
+    setNotice("当前条件没有可随机的号码");
+    return;
+  }
+
+  const currentMin = Math.max(1, Number(els.minPickCount.value) || DEFAULT_MIN_PICK);
+  const currentMax = Math.max(1, Number(els.pickCount.value) || DEFAULT_MAX_PICK);
+  const answer = window.prompt("请输入随机号码数量，例如：12；也可以输入范围：5-15", `${currentMin}-${currentMax}`);
+  if (answer === null) return;
+
+  const range = parseRandomRange(answer);
+  if (!range) {
+    setNotice("随机数量格式不正确，请输入例如 12 或 5-15");
+    return;
+  }
+
+  const minPick = Math.min(range.minPick, source.length);
+  const maxPick = Math.min(range.maxPick, source.length);
+  const count = randInt(minPick, maxPick);
+  els.minPickCount.value = minPick;
+  els.pickCount.value = maxPick;
+  state.selectedNumbers = new Set(sampleUnique(source, count));
+  state.autoRandomSelection = false;
+  refreshAfterChange();
+  setNotice(minPick === maxPick ? `已随机生成 ${count} 个号码` : `已随机生成 ${count} 个号码（范围 ${minPick}-${maxPick}）`);
+}
+
+function showRandomDialog() {
+  const currentMin = Math.max(1, Number(els.minPickCount.value) || DEFAULT_MIN_PICK);
+  const currentMax = Math.max(1, Number(els.pickCount.value) || DEFAULT_MAX_PICK);
+  els.randomCountInput.value = currentMin === currentMax ? String(currentMin) : `${currentMin}-${currentMax}`;
+  els.randomDialog.hidden = false;
+  setTimeout(() => {
+    els.randomCountInput.focus();
+    els.randomCountInput.select();
+  }, 0);
+}
+
+function hideRandomDialog() {
+  els.randomDialog.hidden = true;
+}
+
+function confirmRandomDialog() {
+  const range = parseRandomRange(els.randomCountInput.value);
+  if (!range) {
+    setNotice("随机数量格式不正确，请输入例如 12 或 5-15");
+    els.randomCountInput.focus();
+    return;
+  }
+
+  const source = randomSourceNumbers();
+  if (!source.length) {
+    hideRandomDialog();
+    setNotice("当前条件没有可随机的号码");
+    return;
+  }
+
+  const minPick = Math.min(range.minPick, source.length);
+  const maxPick = Math.min(range.maxPick, source.length);
+  const count = randInt(minPick, maxPick);
+  els.minPickCount.value = minPick;
+  els.pickCount.value = maxPick;
+  state.selectedNumbers = new Set(sampleUnique(source, count));
+  state.autoRandomSelection = false;
+  hideRandomDialog();
+  refreshAfterChange();
+  setNotice(minPick === maxPick ? `已随机生成 ${count} 个号码` : `已随机生成 ${count} 个号码（范围 ${minPick}-${maxPick}）`);
+}
+
 function ensureGenerationCandidates() {
   let candidates = activeCandidates();
   const shouldRandomize = !hasActiveSelectionFilter() && (!candidates.length || state.autoRandomSelection);
@@ -964,6 +1174,14 @@ function roundedStakeUnit(value) {
   return Math.max(STAKE_UNIT, Math.round(value / STAKE_UNIT) * STAKE_UNIT);
 }
 
+function ceilStakeUnit(value) {
+  return Math.max(STAKE_UNIT, Math.ceil(value / STAKE_UNIT) * STAKE_UNIT);
+}
+
+function floorStakeUnit(value) {
+  return Math.max(STAKE_UNIT, Math.floor(value / STAKE_UNIT) * STAKE_UNIT);
+}
+
 function stakeLadder(maxValue) {
   const ladder = new Set(STAKE_STYLE_VALUES);
   const max = Math.max(500, Math.ceil(maxValue / 500) * 500);
@@ -992,6 +1210,11 @@ function scaledTierRange(key, total) {
     max: Math.max(1, Math.max(min, max)),
     title: rule.title,
   };
+}
+
+function currentBudgetRangeUnit() {
+  const raw = Math.max(0, Number(els.budgetRange.value) || 0);
+  return raw > 0 ? roundedStakeUnit(raw) : STAKE_UNIT * 4;
 }
 
 function randomStakeInRange(range, remain) {
@@ -1208,6 +1431,61 @@ function tierLinesFromAllocations(tiers, allocations, prefixes, desiredCount) {
   return normalizeTierLineCount(lines, desiredCount, prefixes);
 }
 
+function expandLinesToAtLeast(lines, minCount, prefixes) {
+  const output = lines.map((line) => ({ ...line, numbers: line.numbers.slice() }));
+
+  while (output.length < minCount) {
+    const index = output
+      .map((line, lineIndex) => ({ line, lineIndex }))
+      .filter(({ line }) => line.numbers.length > 1)
+      .sort((a, b) => tierLineTotal(b.line) - tierLineTotal(a.line))[0]?.lineIndex;
+    if (index === undefined) break;
+    const line = output[index];
+    const midpoint = Math.ceil(line.numbers.length / 2);
+    output.splice(
+      index,
+      1,
+      { ...line, numbers: line.numbers.slice(0, midpoint) },
+      { ...line, numbers: line.numbers.slice(midpoint) }
+    );
+  }
+
+  return refreshLineTotals(output, prefixes);
+}
+
+function tierLinesFromAllocationsExact(tiers, allocations, prefixes, minCount) {
+  const lines = [];
+
+  tiers.forEach((tier) => {
+    const remaining = Object.fromEntries(tier.numbers.map((num) => [num, Math.max(0, allocations[num] || 0)]));
+    let guard = 0;
+
+    while (Object.values(remaining).some((amount) => amount > 0) && guard < 300) {
+      guard += 1;
+      const available = tier.numbers.filter((num) => remaining[num] > 0);
+      const amounts = available.map((num) => remaining[num]).sort((a, b) => a - b);
+      const each = amounts[0] || 0;
+      if (!each) break;
+      const eligible = available.filter((num) => remaining[num] >= each);
+      const { minPick, maxPick } = pickRange(eligible.length || 1);
+      const size = Math.min(eligible.length, randInt(minPick, maxPick));
+      const selected = sampleUnique(eligible, Math.max(1, size));
+
+      selected.forEach((num) => {
+        remaining[num] -= each;
+      });
+
+      lines.push({
+        tier: tier.key,
+        numbers: selected.slice().sort((a, b) => a - b),
+        each,
+      });
+    }
+  });
+
+  return expandLinesToAtLeast(lines, minCount, prefixes);
+}
+
 function tierBudgetFromAllocations(tier, allocations) {
   return tier.numbers.reduce((sum, num) => sum + (allocations[num] || 0), 0);
 }
@@ -1420,6 +1698,261 @@ function makeOptimizedTargets(candidates, tiers, originalAllocations, total, odd
   };
 }
 
+function manualTierCounts(tiers) {
+  return Object.fromEntries(tiers.map((tier) => [tier.key, tier.numbers.length]));
+}
+
+function rangeMinTotal(tiers, ranges) {
+  return tiers.reduce((sum, tier) => sum + tier.numbers.length * ranges[tier.key].min, 0);
+}
+
+function rangeMaxTotal(tiers, ranges) {
+  return tiers.reduce((sum, tier) => sum + tier.numbers.length * ranges[tier.key].max, 0);
+}
+
+function tierCount(tiers, key) {
+  return tiers.find((tier) => tier.key === key)?.numbers.length || 0;
+}
+
+function tierHalfSpread(tiers, key, interval, scale = 1) {
+  const count = tierCount(tiers, key);
+  const countSpread = STAKE_UNIT * Math.min(12, Math.max(1, Math.ceil(count / 3)));
+  const spread = Math.max(interval, countSpread) * scale;
+  return Math.max(STAKE_UNIT, ceilStakeUnit(spread / 2));
+}
+
+function compressedManualRanges(tiers, total, interval, safeMinimum, canProtectAllNumbers) {
+  const tolerance = totalOverageTolerance(total);
+  const counts = manualTierCounts(tiers);
+  const countTotal = tiers.reduce((sum, tier) => sum + tier.numbers.length, 0);
+  const floor = canProtectAllNumbers ? safeMinimum : STAKE_UNIT;
+
+  for (let scale = 1; scale >= 0.25; scale -= 0.125) {
+    const defenseHalf = tierHalfSpread(tiers, "defense", interval, scale);
+    const secondHalf = tierHalfSpread(tiers, "second", interval, scale);
+    const mainHalf = tierHalfSpread(tiers, "main", interval, scale);
+    const gapDefenseSecond = defenseHalf + secondHalf + STAKE_UNIT;
+    const gapSecondMain = secondHalf + mainHalf + STAKE_UNIT;
+    const center = floorStakeUnit(
+      (total -
+        (counts.second || 0) * gapDefenseSecond -
+        (counts.main || 0) * (gapDefenseSecond + gapSecondMain)) /
+        Math.max(1, countTotal)
+    );
+    const defenseMin = Math.max(floor, center - defenseHalf);
+    const defenseMax = Math.max(defenseMin, center + defenseHalf);
+    const secondMin = defenseMax + STAKE_UNIT;
+    const secondMax = Math.max(secondMin, secondMin + secondHalf * 2);
+    const mainMin = secondMax + STAKE_UNIT;
+    const mainMax = Math.max(mainMin, mainMin + mainHalf * 2);
+    const ranges = {
+      defense: { min: defenseMin, max: defenseMax, title: "C档 随机防守" },
+      second: { min: secondMin, max: secondMax, title: "B档 随机次攻" },
+      main: { min: mainMin, max: mainMax, title: "A档 随机主攻" },
+    };
+
+    if (rangeMinTotal(tiers, ranges) <= total + tolerance && rangeMaxTotal(tiers, ranges) >= total) {
+      return ranges;
+    }
+  }
+
+  const orderedGap = (counts.second || 0) * STAKE_UNIT + (counts.main || 0) * STAKE_UNIT * 2;
+  const base = Math.max(floor, floorStakeUnit((total + tolerance - orderedGap) / Math.max(1, countTotal)));
+  return {
+    defense: { min: Math.max(STAKE_UNIT, base - interval), max: base + interval, title: "C档 最低随机" },
+    second: { min: base + interval + STAKE_UNIT, max: base + interval * 2 + STAKE_UNIT, title: "B档 最低随机" },
+    main: { min: base + interval * 2 + STAKE_UNIT * 2, max: base + interval * 3 + STAKE_UNIT * 2, title: "A档 最低随机" },
+  };
+}
+
+function strictManualTierRanges(tiers, total, odds) {
+  const tolerance = totalOverageTolerance(total);
+  const interval = currentBudgetRangeUnit();
+  const breakEven = total / odds;
+  const safeMinimum = ceilStakeUnit(breakEven + 1);
+  const countTotal = tiers.reduce((sum, tier) => sum + tier.numbers.length, 0);
+  const canProtectAllNumbers = countTotal < odds;
+  const counts = manualTierCounts(tiers);
+
+  const ratioDefenseMin = ceilStakeUnit(breakEven * 1.15);
+  const ratioDefenseMax = Math.max(ratioDefenseMin + STAKE_UNIT, ceilStakeUnit(breakEven * 1.2));
+  let defenseMin = Math.max(safeMinimum, ratioDefenseMin);
+  let defenseMax = Math.max(defenseMin + interval, ratioDefenseMax);
+  let secondMin = Math.max(defenseMax + STAKE_UNIT, ceilStakeUnit(defenseMin * 1.4));
+  let secondMax = Math.max(secondMin + interval, ceilStakeUnit(defenseMax * 1.5));
+  let mainMin = Math.max(secondMax + STAKE_UNIT, ceilStakeUnit(defenseMin * 1.8));
+  let mainMax = Math.max(mainMin + interval, ceilStakeUnit(defenseMax * 2));
+
+  let ranges = {
+    defense: { min: defenseMin, max: defenseMax, title: "C档 保本×1.15~1.20" },
+    second: { min: secondMin, max: secondMax, title: "B档 C档×1.40~1.50" },
+    main: { min: mainMin, max: mainMax, title: "A档 C档×1.80~2.00" },
+  };
+
+  if (rangeMinTotal(tiers, ranges) > total + tolerance) {
+    ranges = compressedManualRanges(tiers, total, interval, safeMinimum, canProtectAllNumbers);
+  }
+
+  return {
+    ...ranges,
+    safeMinimum,
+    ratio: "C=保本×1.15~1.20，B=C×1.40~1.50，A=C×1.80~2.00",
+  };
+}
+
+function tierPriorityForTargets(tiers) {
+  const tierMap = new Map(tiers.map((tier) => [tier.key, tier]));
+  return TIER_PRIORITY.map((key) => tierMap.get(key)).filter((tier) => tier?.numbers.length);
+}
+
+function fillWeightForTier(key) {
+  if (key === "main") return 5;
+  if (key === "second") return 3;
+  return 2;
+}
+
+function targetCapacityEntries(tiers, targets, ranges) {
+  return tierPriorityForTargets(tiers)
+    .flatMap((tier) =>
+      tier.numbers
+        .filter((num) => targets[num] + STAKE_UNIT <= ranges[tier.key].max)
+        .map((num) => ({
+          num,
+          tier: tier.key,
+          score: Math.random() / fillWeightForTier(tier.key),
+        }))
+    )
+    .sort((left, right) => left.score - right.score || left.num - right.num);
+}
+
+function extendPriorityCapacity(tiers, ranges, amount) {
+  if (amount <= 0) return;
+  const priorityTier = tierPriorityForTargets(tiers)[0];
+  if (!priorityTier) return;
+  const extraEach = ceilStakeUnit(amount / Math.max(1, priorityTier.numbers.length));
+  ranges[priorityTier.key].max += Math.max(STAKE_UNIT, extraEach);
+}
+
+function randomTargetInRange(range) {
+  const min = roundedStakeUnit(range.min);
+  const max = Math.max(min, roundedStakeUnit(range.max));
+  const steps = Math.max(0, Math.floor((max - min) / STAKE_UNIT));
+  return min + randInt(0, steps) * STAKE_UNIT;
+}
+
+function targetTotalFromTargets(targets, candidates) {
+  return candidates.reduce((sum, num) => sum + (targets[num] || 0), 0);
+}
+
+function targetAdjustChoices(tiers, targets, ranges, mode) {
+  const tierOrder = mode === "reduce" ? ["second", "main", "defense"] : ["main", "second", "defense"];
+  const priority = Object.fromEntries(tierOrder.map((key, index) => [key, index]));
+  const tierMap = new Map(tiers.map((tier) => [tier.key, tier]));
+
+  return tierOrder
+    .flatMap((key) => {
+      const tier = tierMap.get(key);
+      if (!tier) return [];
+      return shuffledItems(tier.numbers)
+        .filter((num) =>
+          mode === "reduce"
+            ? targets[num] - STAKE_UNIT >= ranges[key].min
+            : targets[num] + STAKE_UNIT <= ranges[key].max
+        )
+        .map((num) => ({
+          num,
+          key,
+          score: (mode === "reduce" ? priority[key] * 100 : 0) + Math.random() / fillWeightForTier(key),
+        }));
+    })
+    .sort((left, right) => left.score - right.score || left.num - right.num);
+}
+
+function adjustTargetsToBudget(targets, candidates, tiers, ranges, targetTotal) {
+  let guard = 0;
+
+  while (guard < 50000) {
+    guard += 1;
+    const current = targetTotalFromTargets(targets, candidates);
+    if (current === targetTotal) break;
+
+    const mode = current > targetTotal ? "reduce" : "increase";
+    const choices = targetAdjustChoices(tiers, targets, ranges, mode);
+    if (!choices.length) break;
+
+    const choice = choices[0];
+    targets[choice.num] += mode === "reduce" ? -STAKE_UNIT : STAKE_UNIT;
+  }
+}
+
+function diversifyTierTargets(tiers, targets, ranges) {
+  const interval = currentBudgetRangeUnit();
+
+  tiers.forEach((tier) => {
+    if (tier.numbers.length < 2) return;
+    const lowerFloor = Math.max(STAKE_UNIT, ranges[tier.key].min - interval);
+
+    for (let attempt = 0; attempt < tier.numbers.length * 4; attempt += 1) {
+      const buckets = new Map();
+      tier.numbers.forEach((num) => {
+        const amount = targets[num] || 0;
+        if (!buckets.has(amount)) buckets.set(amount, []);
+        buckets.get(amount).push(num);
+      });
+      const duplicate = [...buckets.entries()]
+        .filter(([, nums]) => nums.length > 1)
+        .sort((left, right) => right[1].length - left[1].length)[0];
+      if (!duplicate) break;
+
+      const duplicatedNumbers = shuffledItems(duplicate[1]);
+      const up = duplicatedNumbers.find((num) => targets[num] + STAKE_UNIT <= ranges[tier.key].max);
+      const down = shuffledItems(tier.numbers).find((num) => num !== up && targets[num] - STAKE_UNIT >= lowerFloor);
+      if (up === undefined || down === undefined) break;
+
+      const step = Math.min(
+        interval,
+        ranges[tier.key].max - targets[up],
+        targets[down] - lowerFloor,
+        randomItem([STAKE_UNIT, STAKE_UNIT * 2, STAKE_UNIT * 3])
+      );
+      const amount = Math.max(STAKE_UNIT, Math.floor(step / STAKE_UNIT) * STAKE_UNIT);
+      targets[up] += amount;
+      targets[down] -= amount;
+    }
+  });
+}
+
+function makeManualOptimizedTargets(candidates, tiers, total, odds) {
+  const ranges = strictManualTierRanges(tiers, total, odds);
+  const targetTotal = roundedStakeUnit(total);
+  const targets = Object.fromEntries(candidates.map((num) => [num, 0]));
+  const tierByNumber = tiers[0]?.tierByNumber || new Map();
+
+  tiers.forEach((tier) => {
+    tier.numbers.forEach((num) => {
+      targets[num] = randomTargetInRange(ranges[tier.key]);
+    });
+  });
+
+  const maxTotal = tiers.reduce((sum, tier) => sum + ranges[tier.key].max * tier.numbers.length, 0);
+  if (targetTotal > maxTotal) extendPriorityCapacity(tiers, ranges, targetTotal - maxTotal);
+
+  adjustTargetsToBudget(targets, candidates, tiers, ranges, targetTotal);
+  diversifyTierTargets(tiers, targets, ranges);
+  adjustTargetsToBudget(targets, candidates, tiers, ranges, targetTotal);
+
+  return {
+    targets,
+    ranges,
+    targetTotal,
+    actualTargetTotal: candidates.reduce((sum, num) => sum + (targets[num] || 0), 0),
+    breakEven: total / odds,
+    safeMinimum: ranges.safeMinimum,
+    tierByNumber,
+    unallocated: Math.max(0, targetTotal - targetTotalFromTargets(targets, candidates)),
+  };
+}
+
 function lineTierScore(line, tierByNumber) {
   if (!line.numbers.length) return 0;
   return line.numbers.reduce((sum, num) => sum + tierWeight(tierByNumber.get(num)), 0) / line.numbers.length;
@@ -1565,6 +2098,75 @@ function ensureOptimizedProfit(lines, candidates, total, odds, tierByNumber) {
   }
 }
 
+function profitProtectionOrder(candidates, tiers, odds) {
+  const cap = Math.max(1, Math.ceil(odds) - 1);
+  const candidateSet = new Set(candidates);
+  const ordered = [];
+  const seen = new Set();
+
+  tierPriorityForTargets(tiers).forEach((tier) => {
+    tier.numbers.forEach((num) => {
+      if (!candidateSet.has(num) || seen.has(num)) return;
+      seen.add(num);
+      ordered.push(num);
+    });
+  });
+
+  candidates.forEach((num) => {
+    if (seen.has(num)) return;
+    seen.add(num);
+    ordered.push(num);
+  });
+
+  return ordered.slice(0, Math.min(candidates.length, cap));
+}
+
+function ensureProtectedProfitByTopUp(lines, candidates, odds, tiers) {
+  const protectedNumbers = profitProtectionOrder(candidates, tiers, odds);
+  const protectedSet = new Set(protectedNumbers);
+  const tierByNumber = tiers[0]?.tierByNumber || new Map();
+  let topUpTotal = 0;
+  let guard = 0;
+
+  while (guard < 20000) {
+    guard += 1;
+    const total = planTotalFromLines(lines);
+    const allocations = applyLineAllocations(lines, candidates);
+    const losing = protectedNumbers
+      .map((num) => ({
+        num,
+        amount: allocations[num] || 0,
+        profit: (allocations[num] || 0) * odds - total,
+      }))
+      .filter((item) => item.profit <= 0)
+      .sort((left, right) => left.profit - right.profit || tierWeight(tierByNumber.get(right.num)) - tierWeight(tierByNumber.get(left.num)))[0];
+
+    if (!losing) break;
+
+    const deficit = total - losing.amount * odds + 1;
+    const boost = Math.max(STAKE_UNIT, ceilStakeUnit(deficit / Math.max(1, odds - 1)));
+    lines.push({
+      tier: tierByNumber.get(losing.num) || "defense",
+      numbers: [losing.num],
+      each: boost,
+      topUp: true,
+    });
+    topUpTotal += boost;
+  }
+
+  const total = planTotalFromLines(lines);
+  const allocations = applyLineAllocations(lines, candidates);
+  const stillLosingProtected = protectedNumbers.filter((num) => (allocations[num] || 0) * odds - total <= 0);
+
+  return {
+    topUpTotal,
+    protectedNumbers,
+    protectedCount: protectedNumbers.length,
+    unprotectedCount: Math.max(0, candidates.length - protectedSet.size),
+    stillLosingProtected,
+  };
+}
+
 function optimizedFinalCheck(candidates, allocations, total, odds, tiers) {
   const profits = Object.fromEntries(candidates.map((num) => [num, (allocations[num] || 0) * odds - total]));
   const losingNumbers = candidates.filter((num) => profits[num] <= 0);
@@ -1581,19 +2183,84 @@ function optimizedFinalCheck(candidates, allocations, total, odds, tiers) {
   };
 }
 
+function tierProfitOrderValid(tiers, allocations) {
+  const amountsFor = (key) =>
+    tiers
+      .find((tier) => tier.key === key)
+      ?.numbers.map((num) => allocations[num] || 0) || [];
+  const main = amountsFor("main");
+  const second = amountsFor("second");
+  const defense = amountsFor("defense");
+  const minMain = main.length ? Math.min(...main) : Number.POSITIVE_INFINITY;
+  const maxSecond = second.length ? Math.max(...second) : Number.NEGATIVE_INFINITY;
+  const minSecond = second.length ? Math.min(...second) : Number.POSITIVE_INFINITY;
+  const maxDefense = defense.length ? Math.max(...defense) : Number.NEGATIVE_INFINITY;
+  return (main.length && second.length ? minMain > maxSecond : true) && (second.length && defense.length ? minSecond > maxDefense : true);
+}
+
+function makeManualOptimizedBettingPlan(candidates, manualTiers, total, odds, prefixes) {
+  const targetPlan = makeManualOptimizedTargets(candidates, manualTiers, total, odds);
+  const outputGroupCount = currentGroupCount();
+  const outputBlockSizes = randomBlockSizes(outputGroupCount);
+  const desiredLineCount = blockSizesTotal(outputBlockSizes);
+  const lines = tierLinesFromAllocationsExact(tierPriorityForTargets(manualTiers), targetPlan.targets, prefixes, desiredLineCount);
+  const topUpPlan = ensureProtectedProfitByTopUp(lines, candidates, odds, manualTiers);
+  const allocations = applyLineAllocations(lines, candidates);
+  const actualTotal = planTotalFromLines(lines);
+  const normalizedOutputBlockSizes = normalizeBlockSizes(lines.length, outputGroupCount, outputBlockSizes);
+  const finalCheck = optimizedFinalCheck(candidates, allocations, actualTotal, odds, manualTiers);
+  const summaries = manualTiers.map((tier) => {
+    const netRange = netRangeFor(tier.numbers, allocations, actualTotal, odds);
+    return {
+      ...tier,
+      budget: tierBudgetFromAllocations(tier, allocations),
+      perNumber: tierStakeText(tier.numbers, allocations),
+      netRange,
+      tierByNumber: undefined,
+    };
+  });
+
+  return {
+    type: "optimized",
+    lines,
+    allocations,
+    candidates,
+    total: actualTotal,
+    targetTotal: total,
+    odds,
+    tiers: summaries,
+    limits: null,
+    outputGroupCount,
+    outputBlockSizes: normalizedOutputBlockSizes,
+    optimization: {
+      ...targetPlan,
+      ...topUpPlan,
+      finalCheck,
+      manualProfitOrder: tierProfitOrderValid(manualTiers, allocations),
+      originalTiers: Object.fromEntries(manualTiers.map((tier) => [tier.key, tier.numbers.slice()])),
+    },
+    signature: currentPlanSignature(candidates),
+  };
+}
+
 function makeOptimizedBettingPlan() {
+  const total = currentBudget();
+  const odds = currentOdds();
+  const prefixes = getCheckedValues("prefix");
+  const candidatesForManual = ensureGenerationCandidates();
+  const manualTiers = classifyManualOptimizedTiers(candidatesForManual);
+  if (manualTiers) {
+    return makeManualOptimizedBettingPlan(candidatesForManual, manualTiers, total, odds, prefixes);
+  }
+
   const outputGroupCount = currentGroupCount();
   const outputBlockSizes = randomBlockSizes(outputGroupCount);
   const basePlan = generatePlan(blockSizesTotal(outputBlockSizes));
   if (!basePlan) return null;
 
-  const total = currentBudget();
-  const odds = currentOdds();
-  const prefixes = getCheckedValues("prefix");
   const candidates = basePlan.candidates.slice();
   const originalAllocations = { ...basePlan.allocations };
-  const manualTiers = classifyManualOptimizedTiers(candidates);
-  const tiers = manualTiers || classifyOptimizedTiers(candidates, originalAllocations);
+  const tiers = classifyOptimizedTiers(candidates, originalAllocations);
   const tierByNumber = tiers[0]?.tierByNumber || new Map();
   const targetPlan = makeOptimizedTargets(candidates, tiers, originalAllocations, total, odds);
   const lines = seedOptimizedLines(basePlan.lines, targetPlan.targets);
@@ -1601,11 +2268,12 @@ function makeOptimizedBettingPlan() {
   adjustOptimizedTotal(lines, candidates, total, tierByNumber, targetPlan.safeMinimum);
   ensureOptimizedProfit(lines, candidates, total, odds, tierByNumber);
   adjustOptimizedTotal(lines, candidates, total, tierByNumber, targetPlan.safeMinimum);
+  const topUpPlan = ensureProtectedProfitByTopUp(lines, candidates, odds, tiers);
   refreshLineTotals(lines, prefixes);
 
   const allocations = applyLineAllocations(lines, candidates);
   const actualTotal = planTotalFromLines(lines);
-  const finalTiers = manualTiers || classifyOptimizedTiers(candidates, allocations);
+  const finalTiers = classifyOptimizedTiers(candidates, allocations);
   const finalCheck = optimizedFinalCheck(candidates, allocations, actualTotal, odds, finalTiers);
   const summaries = finalTiers.map((tier) => {
     const netRange = netRangeFor(tier.numbers, allocations, actualTotal, odds);
@@ -1633,6 +2301,7 @@ function makeOptimizedBettingPlan() {
     outputBlockSizes,
     optimization: {
       ...targetPlan,
+      ...topUpPlan,
       finalCheck,
       originalAllocations,
       originalTiers: Object.fromEntries(tiers.map((tier) => [tier.key, tier.numbers.slice()])),
@@ -1734,12 +2403,149 @@ function renderGroupSummary(plan) {
   `;
 }
 
+function amountSplitPickSize(count) {
+  const maxPick = Math.max(DISPLAY_MIN_LINE_NUMBERS, Number(els.pickCount?.value) || DEFAULT_MAX_PICK);
+  if (count <= maxPick) return count;
+  const minPick = Math.min(DISPLAY_MIN_LINE_NUMBERS, count);
+  const choices = [];
+
+  for (let size = minPick; size <= maxPick; size += 1) {
+    const rest = count - size;
+    if (rest === 0 || rest >= DISPLAY_MIN_LINE_NUMBERS) choices.push(size);
+  }
+
+  return choices.length ? randomItem(choices) : Math.min(maxPick, count);
+}
+
+function mergeShortAmountLines(lines) {
+  const maxPick = Math.max(DISPLAY_MIN_LINE_NUMBERS, Number(els.pickCount?.value) || DEFAULT_MAX_PICK);
+  const output = lines.map((line) => ({ ...line, numbers: line.numbers.slice() }));
+  let changed = true;
+
+  while (changed) {
+    changed = false;
+    const shortIndex = output.findIndex((line) => line.numbers.length > 0 && line.numbers.length < DISPLAY_MIN_LINE_NUMBERS);
+    if (shortIndex < 0) break;
+
+    const shortLine = output[shortIndex];
+    const need = DISPLAY_MIN_LINE_NUMBERS - shortLine.numbers.length;
+    const shortSet = new Set(shortLine.numbers);
+    const donorIndex = output.findIndex(
+      (line, index) =>
+        index !== shortIndex &&
+        line.each === shortLine.each &&
+        line.numbers.length - need >= DISPLAY_MIN_LINE_NUMBERS &&
+        line.numbers.some((num) => !shortSet.has(num))
+    );
+
+    if (donorIndex >= 0) {
+      const donor = output[donorIndex];
+      const moved = donor.numbers.filter((num) => !shortSet.has(num)).slice(0, need);
+      if (moved.length === need) {
+        const movedSet = new Set(moved);
+        shortLine.numbers = [...shortLine.numbers, ...moved].sort((a, b) => a - b);
+        donor.numbers = donor.numbers.filter((num) => !movedSet.has(num));
+        changed = true;
+        continue;
+      }
+    }
+
+    const mergeIndex = output.findIndex(
+      (line, index) =>
+        index !== shortIndex &&
+        line.each === shortLine.each &&
+        line.numbers.length + shortLine.numbers.length <= maxPick &&
+        line.numbers.every((num) => !shortSet.has(num))
+    );
+
+    if (mergeIndex < 0) break;
+
+    output[mergeIndex] = {
+      ...output[mergeIndex],
+      numbers: [...output[mergeIndex].numbers, ...shortLine.numbers].sort((a, b) => a - b),
+    };
+    output.splice(shortIndex, 1);
+    changed = true;
+  }
+
+  return output;
+}
+
+function splitLineAmount(line) {
+  if (line.each <= STAKE_UNIT) return [line];
+  const firstEach = Math.max(STAKE_UNIT, Math.min(line.each - STAKE_UNIT, roundedStakeUnit(line.each / 2)));
+  return [
+    { ...line, each: firstEach },
+    { ...line, each: line.each - firstEach },
+  ];
+}
+
+function expandAmountLinesForGroups(lines, groupCount) {
+  const output = lines.map((line) => ({ ...line, numbers: line.numbers.slice() }));
+
+  while (output.length < groupCount) {
+    const index = output
+      .map((line, lineIndex) => ({ line, lineIndex }))
+      .filter(({ line }) => line.numbers.length >= DISPLAY_MIN_LINE_NUMBERS && line.each > STAKE_UNIT)
+      .sort((left, right) => right.line.each - left.line.each || right.line.numbers.length - left.line.numbers.length)[0]?.lineIndex;
+    if (index === undefined) break;
+    const replacement = splitLineAmount(output[index]);
+    if (replacement.length < 2) break;
+    output.splice(index, 1, ...replacement);
+  }
+
+  return output;
+}
+
+function amountSplitLinesFromPlan(plan) {
+  if (!plan?.allocations || !plan?.candidates?.length) return plan?.lines || [];
+
+  const remaining = Object.fromEntries(
+    plan.candidates.map((num) => [num, Math.max(0, roundedStakeUnit(plan.allocations[num] || 0))])
+  );
+  const lines = [];
+  let guard = 0;
+
+  while (guard < 2000) {
+    guard += 1;
+    const available = plan.candidates.filter((num) => remaining[num] > 0);
+    if (!available.length) break;
+
+    const size = amountSplitPickSize(available.length);
+    const selected = sampleUnique(available, Math.max(1, size));
+    const each = Math.min(...selected.map((num) => remaining[num]));
+    if (!each) break;
+
+    selected.forEach((num) => {
+      remaining[num] -= each;
+    });
+    lines.push({
+      numbers: selected.slice().sort((a, b) => a - b),
+      each,
+    });
+  }
+
+  return expandAmountLinesForGroups(mergeShortAmountLines(lines), plan.outputGroupCount || currentGroupCount());
+}
+
 function planText(plan) {
-  return groupedLinesText(plan.lines, plan.outputBlockSizes);
+  const resultLines = amountSplitLinesFromPlan(plan);
+  const groupCount = plan.outputGroupCount || currentGroupCount();
+  const blockSizes = normalizeBlockSizes(resultLines.length, groupCount);
+  return groupedLinesText(resultLines, blockSizes);
 }
 
 function tierPlanNotice(plan) {
   if (plan?.type === "optimized") {
+    if (plan.optimization?.finalCheck?.losingNumbers?.length) {
+      if ((plan.candidates?.length || 0) >= (plan.odds || currentOdds())) {
+        return `赔率 ${plan.odds} 最多选 ${Math.max(1, Math.floor(plan.odds) - 1)} 个号码才可能全部盈利；当前 ${plan.candidates.length} 个必然会有亏损`;
+      }
+      return `仍有 ${plan.optimization.finalCheck.losingNumbers.length} 个号码未盈利，请减少号码或提高预算`;
+    }
+    if (plan.optimization?.manualProfitOrder === false) {
+      return "当前预算不足以完全拉开主攻、次攻、防守利润，已尽量按档位优先";
+    }
     return "";
   }
   if (!plan || plan.type !== "tier") return "";
@@ -1780,10 +2586,10 @@ function scheduleAutoPreview() {
     const plan = candidates.length ? makeOptimizedBettingPlan() : null;
     if (!plan) return;
     applyGeneratedPlan(plan, false);
-  }, 280);
+  }, 360);
 }
 
-function refreshAfterChange() {
+function clearGeneratedPreview() {
   clearTimeout(autoPreviewTimer);
   state.lastPlan = null;
   resetProfitState();
@@ -1791,6 +2597,16 @@ function refreshAfterChange() {
   els.resultOutput.value = "";
   setNotice("");
   saveState();
+}
+
+function refreshAfterInputChange() {
+  clearGeneratedPreview();
+  updateStats();
+  scheduleAutoPreview();
+}
+
+function refreshAfterChange() {
+  clearGeneratedPreview();
   const candidates = activeCandidates();
   if (candidates.length && hasBudgetAmount()) {
     const plan = makeOptimizedBettingPlan();
@@ -1806,6 +2622,14 @@ function refreshAfterChange() {
 
 function renderAllocationPanel(plan) {
   if (!els.allocationPanel) return;
+  els.allocationPanel.classList.add("marquee-panel");
+  els.allocationPanel.innerHTML = `
+    <div class="notice-marquee" aria-label="免责声明">
+      <span>软件生明：本软件为免费程序，如用做其他用途，与作者无关！！！                                                                   定制软件联系TG：ll_root</span>
+    </div>
+  `;
+  els.allocationPanel.hidden = false;
+  return;
   if (!plan) {
     els.allocationPanel.hidden = true;
     els.allocationPanel.innerHTML = "";
@@ -1950,7 +2774,6 @@ function saveState() {
   const data = {
     separators: els.separators.value,
     oddsAmount: els.oddsAmount.value,
-    usageCount: state.usageCount,
   };
   localStorage.setItem(STORAGE_KEY, JSON.stringify(data));
 }
@@ -1963,11 +2786,9 @@ function restoreState() {
     ["separators", "oddsAmount"].forEach((key) => {
       if (data[key] !== undefined && els[key]) els[key].value = data[key];
     });
-    state.usageCount = Math.max(0, Number(data.usageCount ?? data.multiExportCount) || 0);
   } catch {
     localStorage.removeItem(STORAGE_KEY);
   }
-  updateUsageCountText();
 }
 
 function setCheckedValues(name, values) {
@@ -2008,14 +2829,34 @@ function bindEvents() {
   });
 
   els.randomBtn.addEventListener("click", () => {
-    promptRandomSelection();
+    showRandomDialog();
+  });
+
+  els.randomConfirmBtn.addEventListener("click", () => {
+    confirmRandomDialog();
+  });
+
+  els.randomCancelBtn.addEventListener("click", () => {
+    hideRandomDialog();
+  });
+
+  els.randomDialog.addEventListener("click", (event) => {
+    if (event.target === els.randomDialog) hideRandomDialog();
+  });
+
+  els.randomCountInput.addEventListener("keydown", (event) => {
+    if (event.key === "Enter") confirmRandomDialog();
+    if (event.key === "Escape") hideRandomDialog();
   });
 
   els.multiBtn.addEventListener("click", () => {
     if (!requireBudgetAmount()) return;
+    const removedGroups = pruneMissingAttackNumbers();
     const plan = canReuseCurrentPlan(state.lastPlan) ? state.lastPlan : makeOptimizedBettingPlan();
     if (!plan) return;
     applyGeneratedPlan(plan, true);
+    const notice = pruneMissingAttackNotice(removedGroups);
+    if (notice) setNotice(notice);
   });
 
   els.profitBtn.addEventListener("click", () => {
@@ -2056,12 +2897,27 @@ function bindEvents() {
     input.addEventListener("input", (event) => {
       if (isAttackInput(input)) formatAttackInput(input, event);
       if (isSelectionFilterControl(input)) applySelectionFilters();
-      refreshAfterChange();
+      refreshAfterInputChange();
+      if (isAttackInput(input)) scheduleAttackPrune(input);
     });
     input.addEventListener("change", () => {
+      let removedGroups = [];
       if (isAttackInput(input)) finalizeAttackInput(input);
-      if (isSelectionFilterControl(input)) applySelectionFilters();
-      refreshAfterChange();
+      if (isAttackInput(input)) removedGroups = pruneMissingAttackNumbers(input);
+      if (isSelectionFilterControl(input)) {
+        applySelectionFilters();
+        removedGroups = pruneMissingAttackNumbers();
+      }
+      refreshAfterInputChange();
+      const notice = pruneMissingAttackNotice(removedGroups);
+      if (notice) setNotice(notice);
+    });
+    input.addEventListener("blur", () => {
+      if (!isAttackInput(input)) return;
+      const removedGroups = pruneMissingAttackNumbers(input);
+      if (!removedGroups.length) return;
+      refreshAfterInputChange();
+      setNotice(pruneMissingAttackNotice(removedGroups));
     });
   });
 }
@@ -2105,9 +2961,12 @@ function collectElements() {
     "manualProfitPanel",
     "totalText",
     "rangeText",
-    "usageCountText",
     "noticeText",
     "resetAll",
+    "randomDialog",
+    "randomCountInput",
+    "randomConfirmBtn",
+    "randomCancelBtn",
   ].forEach((id) => {
     els[id] = document.getElementById(id);
   });
@@ -2117,12 +2976,10 @@ function init() {
   collectElements();
   renderChecks();
   restoreState();
-  incrementUsageCount();
   renderNumberGrid();
   bindEvents();
   updateProfitButton();
   updateStats();
-  updateUsageCountText();
 }
 
 init();

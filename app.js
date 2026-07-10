@@ -789,6 +789,53 @@ function randomDefaultCandidates() {
   return sampleUnique(Array.from({ length: 49 }, (_, index) => index + 1), randInt(minPick, maxPick));
 }
 
+function parseRandomRange(text) {
+  const values = String(text || "")
+    .match(/\d+/g)
+    ?.map(Number)
+    .filter((num) => Number.isInteger(num) && num >= 1 && num <= 49);
+  if (!values?.length) return null;
+  const minPick = values[0];
+  const maxPick = values[1] ?? values[0];
+  return minPick <= maxPick
+    ? { minPick, maxPick }
+    : { minPick: maxPick, maxPick: minPick };
+}
+
+function randomSourceNumbers() {
+  const allNumbers = Array.from({ length: 49 }, (_, index) => index + 1);
+  return hasActiveSelectionFilter() ? allNumbers.filter((num) => matchesFilters(num)) : allNumbers;
+}
+
+function promptRandomSelection() {
+  const currentMin = Math.max(1, Number(els.minPickCount.value) || DEFAULT_MIN_PICK);
+  const currentMax = Math.max(1, Number(els.pickCount.value) || DEFAULT_MAX_PICK);
+  const answer = window.prompt("请输入随机位数范围，例如：5-15", `${currentMin}-${currentMax}`);
+  if (answer === null) return;
+
+  const range = parseRandomRange(answer);
+  if (!range) {
+    setNotice("随机范围格式不正确，请输入例如 5-15");
+    return;
+  }
+
+  const source = randomSourceNumbers();
+  if (!source.length) {
+    setNotice("当前条件没有可随机的号码");
+    return;
+  }
+
+  const minPick = Math.min(range.minPick, source.length);
+  const maxPick = Math.min(range.maxPick, source.length);
+  const count = randInt(minPick, maxPick);
+  els.minPickCount.value = minPick;
+  els.pickCount.value = maxPick;
+  state.selectedNumbers = new Set(sampleUnique(source, count));
+  state.autoRandomSelection = false;
+  refreshAfterChange();
+  setNotice(`已随机生成 ${count} 个号码（范围 ${minPick}-${maxPick}）`);
+}
+
 function ensureGenerationCandidates() {
   let candidates = activeCandidates();
   const shouldRandomize = !hasActiveSelectionFilter() && (!candidates.length || state.autoRandomSelection);
@@ -1859,6 +1906,10 @@ function bindEvents() {
     window.location.reload();
   });
 
+  els.randomBtn.addEventListener("click", () => {
+    promptRandomSelection();
+  });
+
   els.multiBtn.addEventListener("click", () => {
     if (!requireBudgetAmount()) return;
     const plan = canReuseCurrentPlan(state.lastPlan) ? state.lastPlan : makeOptimizedBettingPlan();
@@ -1942,6 +1993,7 @@ function collectElements() {
     "waveGrid",
     "prefixGrid",
     "candidateText",
+    "randomBtn",
     "multiBtn",
     "profitBtn",
     "copyBtn",

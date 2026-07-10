@@ -431,6 +431,10 @@ textarea:focus {
   background: #f7fbff;
 }
 
+.mobile-profit-panel {
+  display: none;
+}
+
 .manual-profit-section {
   display: grid;
   grid-template-columns: 50px minmax(0, 1fr);
@@ -1278,6 +1282,15 @@ textarea {
 
   .result-actions button {
     width: 100%;
+  }
+
+  .manual-groups > .manual-profit-panel {
+    display: none;
+  }
+
+  .mobile-profit-panel {
+    display: grid;
+    margin-top: 8px;
   }
 
   .allocation-grid {

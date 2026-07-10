@@ -2959,6 +2959,7 @@ function collectElements() {
     "allocationPanel",
     "dataPanel",
     "manualProfitPanel",
+    "mobileProfitPanel",
     "totalText",
     "rangeText",
     "noticeText",
@@ -2972,8 +2973,25 @@ function collectElements() {
   });
 }
 
+function syncMobileProfitPanel() {
+  if (!els.manualProfitPanel || !els.mobileProfitPanel) return;
+  els.mobileProfitPanel.innerHTML = els.manualProfitPanel.innerHTML;
+}
+
+function bindProfitPanelMirror() {
+  if (!els.manualProfitPanel || !els.mobileProfitPanel) return;
+  syncMobileProfitPanel();
+  const observer = new MutationObserver(syncMobileProfitPanel);
+  observer.observe(els.manualProfitPanel, {
+    childList: true,
+    subtree: true,
+    characterData: true,
+  });
+}
+
 function init() {
   collectElements();
+  bindProfitPanelMirror();
   renderChecks();
   restoreState();
   renderNumberGrid();

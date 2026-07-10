@@ -1026,26 +1026,6 @@ function refreshLineTotals(lines, prefixes) {
   return lines;
 }
 
-function isSmallStakeLine(line) {
-  return line.each === 10 || line.each === 20;
-}
-
-function preferredSmallStake(lines) {
-  const hasTen = lines.some((line) => line.each === 10);
-  const hasTwenty = lines.some((line) => line.each === 20);
-  if (!hasTen) return 10;
-  if (!hasTwenty) return 20;
-  return null;
-}
-
-function splitSmallStakeLine(line, amount) {
-  if (line.each - amount < STAKE_UNIT) return null;
-  return [
-    { ...line, each: line.each - amount },
-    { ...line, each: amount },
-  ];
-}
-
 function splitTierLine(line) {
   if (line.numbers.length > 1) {
     const midpoint = Math.ceil(line.numbers.length / 2);
@@ -1087,21 +1067,12 @@ function normalizeTierLineCount(lines, desiredCount, prefixes) {
   const output = lines.map((line) => ({ ...line, numbers: line.numbers.slice() }));
 
   while (output.length < desiredCount) {
-    const smallStake = preferredSmallStake(output);
-    const smallIndex = smallStake
-      ? output
-          .map((line, lineIndex) => ({ line, lineIndex }))
-          .filter(({ line }) => line.each - smallStake >= STAKE_UNIT)
-          .sort((a, b) => tierLineTotal(b.line) - tierLineTotal(a.line) || b.line.each - a.line.each)[0]?.lineIndex
-      : undefined;
-    const index = smallIndex ?? output
+    const index = output
       .map((line, lineIndex) => ({ line, lineIndex }))
       .filter(({ line }) => line.numbers.length > 1 || line.each > 1)
       .sort((a, b) => tierLineTotal(b.line) - tierLineTotal(a.line))[0]?.lineIndex;
     if (index === undefined) break;
-    const replacement = smallIndex === undefined
-      ? splitTierLine(output[index])
-      : splitSmallStakeLine(output[index], smallStake);
+    const replacement = splitTierLine(output[index]);
     if (replacement.length < 2) break;
     output.splice(index, 1, ...replacement);
   }
@@ -1110,8 +1081,7 @@ function normalizeTierLineCount(lines, desiredCount, prefixes) {
     let bestIndex = 0;
     let bestScore = Number.POSITIVE_INFINITY;
     for (let index = 0; index < output.length - 1; index += 1) {
-      const smallPenalty = isSmallStakeLine(output[index]) || isSmallStakeLine(output[index + 1]) ? 1000000 : 0;
-      const score = smallPenalty + tierLineTotal(output[index]) + tierLineTotal(output[index + 1]);
+      const score = tierLineTotal(output[index]) + tierLineTotal(output[index + 1]);
       if (score < bestScore) {
         bestScore = score;
         bestIndex = index;
@@ -1172,32 +1142,6 @@ function tierLinesFromAllocations(tiers, allocations, prefixes, desiredCount) {
         lines.push({
           tier: tier.key,
           numbers: sortedNumbers,
-          each,
-        });
-      });
-  });
-
-  return normalizeTierLineCount(lines, desiredCount, prefixes);
-}
-
-function compactTierLinesFromTargets(tiers, targets, desiredCount, prefixes) {
-  const lines = [];
-
-  tiers.forEach((tier) => {
-    const byAmount = new Map();
-    tier.numbers.forEach((num) => {
-      const amount = roundedStakeUnit(targets[num] || 0);
-      if (!amount) return;
-      if (!byAmount.has(amount)) byAmount.set(amount, []);
-      byAmount.get(amount).push(num);
-    });
-
-    [...byAmount.entries()]
-      .sort(([amountA], [amountB]) => amountB - amountA)
-      .forEach(([each, numbers]) => {
-        lines.push({
-          tier: tier.key,
-          numbers: numbers.slice().sort((a, b) => a - b),
           each,
         });
       });
@@ -1278,6 +1222,17 @@ function planTotalFromLines(lines) {
 
 function optimizationTolerance(total) {
   return Math.max(1, Math.round(total * 0.0005));
+}
+
+function totalOverageTolerance(total) {
+  return Math.max(optimizationTolerance(total), Math.round(total * 0.03));
+}
+
+function totalBudgetMiss(currentTotal, targetTotal) {
+  if (currentTotal < targetTotal) {
+    return Math.max(0, targetTotal - currentTotal - optimizationTolerance(targetTotal));
+  }
+  return Math.max(0, currentTotal - targetTotal - totalOverageTolerance(targetTotal));
 }
 
 function classifyOptimizedTiers(candidates, originalAllocations) {
@@ -1439,13 +1394,12 @@ function lineCanDecrease(line, allocations, minimum, nextEach = previousStakeVal
 }
 
 function adjustOptimizedTotalByPairs(lines, candidates, total, tierByNumber, minimum) {
-  const tolerance = optimizationTolerance(total);
   let guard = 0;
 
-  while (Math.abs(planTotalFromLines(lines) - total) > tolerance && guard < 5000) {
+  while (totalBudgetMiss(planTotalFromLines(lines), total) > 0 && guard < 5000) {
     guard += 1;
     const currentTotal = planTotalFromLines(lines);
-    const currentMiss = Math.abs(currentTotal - total);
+    const currentMiss = totalBudgetMiss(currentTotal, total);
     const allocations = applyLineAllocations(lines, candidates);
     let best = null;
 
@@ -1460,10 +1414,9 @@ function adjustOptimizedTotalByPairs(lines, candidates, total, tierByNumber, min
           decreaseLine.numbers.length * (decreaseLine.each - nextDecrease);
         if (!delta) return;
         const nextTotal = currentTotal + delta;
-        const nextMiss = Math.abs(nextTotal - total);
+        const nextMiss = totalBudgetMiss(nextTotal, total);
         if (nextMiss >= currentMiss) return;
-        const smallPenalty = isSmallStakeLine(increaseLine) ? 1000000 : 0;
-        const score = smallPenalty + nextMiss * 1000 - lineTierScore(increaseLine, tierByNumber) + lineTierScore(decreaseLine, tierByNumber);
+        const score = nextMiss * 1000 - lineTierScore(increaseLine, tierByNumber) + lineTierScore(decreaseLine, tierByNumber);
         if (!best || score < best.score) {
           best = { increaseLine, decreaseLine, score };
         }
@@ -1477,10 +1430,9 @@ function adjustOptimizedTotalByPairs(lines, candidates, total, tierByNumber, min
 }
 
 function adjustOptimizedTotal(lines, candidates, total, tierByNumber, minimum) {
-  const tolerance = optimizationTolerance(total);
   let guard = 0;
 
-  while (Math.abs(planTotalFromLines(lines) - total) > tolerance && guard < 60000) {
+  while (totalBudgetMiss(planTotalFromLines(lines), total) > 0 && guard < 60000) {
     guard += 1;
     const currentTotal = planTotalFromLines(lines);
     if (currentTotal < total) {
@@ -1493,19 +1445,12 @@ function adjustOptimizedTotal(lines, candidates, total, tierByNumber, minimum) {
             index,
             nextEach,
             nextTotal,
-            smallPenalty: isSmallStakeLine(line) ? 1 : 0,
             score: lineTierScore(line, tierByNumber),
-            miss: Math.abs(nextTotal - total),
+            miss: totalBudgetMiss(nextTotal, total),
           };
         })
-        .filter((item) => item.miss < Math.abs(currentTotal - total))
-        .sort((left, right) =>
-          left.smallPenalty - right.smallPenalty ||
-          left.miss - right.miss ||
-          right.score - left.score ||
-          left.line.numbers.length - right.line.numbers.length
-        );
-      if (!lineChoices.length || lineChoices[0].miss >= Math.abs(currentTotal - total)) break;
+        .sort((left, right) => left.miss - right.miss || right.score - left.score || left.line.numbers.length - right.line.numbers.length);
+      if (!lineChoices.length || lineChoices[0].miss >= totalBudgetMiss(currentTotal, total)) break;
       lineChoices[0].line.each = lineChoices[0].nextEach;
     } else {
       const allocations = applyLineAllocations(lines, candidates);
@@ -1518,11 +1463,11 @@ function adjustOptimizedTotal(lines, candidates, total, tierByNumber, minimum) {
           return {
             ...item,
             nextTotal,
-            miss: Math.abs(nextTotal - total),
+            miss: totalBudgetMiss(nextTotal, total),
           };
         })
         .sort((left, right) => left.miss - right.miss || left.score - right.score || right.line.each - left.line.each);
-      if (!lineChoices.length || lineChoices[0].miss >= Math.abs(currentTotal - total)) break;
+      if (!lineChoices.length || lineChoices[0].miss >= totalBudgetMiss(currentTotal, total)) break;
       lineChoices[0].line.each = lineChoices[0].nextEach;
     }
   }
@@ -1531,7 +1476,6 @@ function adjustOptimizedTotal(lines, candidates, total, tierByNumber, minimum) {
 }
 
 function ensureOptimizedProfit(lines, candidates, total, odds, tierByNumber) {
-  const tolerance = optimizationTolerance(total);
   let guard = 0;
 
   while (guard < 10000) {
@@ -1547,14 +1491,11 @@ function ensureOptimizedProfit(lines, candidates, total, odds, tierByNumber) {
 
     const boost = lines
       .filter((line) => line.numbers.includes(losing.num))
-      .sort((left, right) =>
-        Number(isSmallStakeLine(left)) - Number(isSmallStakeLine(right)) ||
-        lineTierScore(right, tierByNumber) - lineTierScore(left, tierByNumber)
-      )[0];
+      .sort((left, right) => lineTierScore(right, tierByNumber) - lineTierScore(left, tierByNumber))[0];
     if (!boost) return;
     boost.each = nextStakeValue(boost.each);
 
-    while (planTotalFromLines(lines) - total > tolerance) {
+    while (totalBudgetMiss(planTotalFromLines(lines), total) > 0) {
       const nextAllocations = applyLineAllocations(lines, candidates);
       const reducers = lines
         .map((line) => ({ line, nextEach: previousStakeValue(line.each) }))
@@ -1595,9 +1536,7 @@ function makeOptimizedBettingPlan() {
   const tiers = manualTiers || classifyOptimizedTiers(candidates, originalAllocations);
   const tierByNumber = tiers[0]?.tierByNumber || new Map();
   const targetPlan = makeOptimizedTargets(candidates, tiers, originalAllocations, total, odds);
-  const lines = manualTiers
-    ? compactTierLinesFromTargets(tiers, targetPlan.targets, currentGroupCount(), prefixes)
-    : seedOptimizedLines(basePlan.lines, targetPlan.targets);
+  const lines = seedOptimizedLines(basePlan.lines, targetPlan.targets);
 
   adjustOptimizedTotal(lines, candidates, total, tierByNumber, targetPlan.safeMinimum);
   ensureOptimizedProfit(lines, candidates, total, odds, tierByNumber);

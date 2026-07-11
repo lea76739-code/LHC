@@ -109,7 +109,7 @@ function formatNumbers(numbers) {
 }
 
 function isAttackInput(input) {
-  return ["mainAttackNumbers", "secondAttackNumbers"].includes(input.id);
+  return ["mainAttackNumbers", "secondAttackNumbers", "defenseNumbers"].includes(input.id);
 }
 
 function cursorAfterDigitCount(text, digitCount) {
@@ -159,35 +159,44 @@ function attackInputNumbers(input) {
 }
 
 function attackInputLabel(input) {
-  return input.id === "mainAttackNumbers" ? "主攻" : "次攻";
+  return MANUAL_GROUPS.find((group) => group.input === input.id)?.title || "";
 }
 
 function pruneMissingAttackNumbers(input = null) {
-  const inputs = input
+  return [];
+}
+
+function manualInputElements(input = null) {
+  return input
     ? [input]
-    : [els.mainAttackNumbers, els.secondAttackNumbers].filter(Boolean);
+    : MANUAL_GROUPS.map((group) => els[group.input]).filter(Boolean);
+}
+
+function removeManualDuplicatesFromOtherInputs(sourceInput) {
+  const sourceNumbers = new Set(parseNumbers(sourceInput.value));
+  if (!sourceNumbers.size) return [];
+
   const removedGroups = [];
-
-  inputs.forEach((attackInput) => {
-    const numbers = attackInputNumbers(attackInput);
-    const kept = [];
-    const removed = [];
-
-    numbers.forEach((num) => {
-      if (num >= 1 && num <= 49 && state.selectedNumbers.has(num)) {
-        if (!kept.includes(num)) kept.push(num);
-      } else if (!removed.includes(num)) {
-        removed.push(num);
-      }
+  manualInputElements()
+    .filter((input) => input !== sourceInput)
+    .forEach((input) => {
+      const values = parseNumbers(input.value);
+      const kept = values.filter((num) => !sourceNumbers.has(num));
+      const removed = values.filter((num) => sourceNumbers.has(num));
+      if (!removed.length) return;
+      input.value = formatNumbers(kept);
+      removedGroups.push(`${attackInputLabel(input)} ${removed.map(twoDigit).join(".")}`);
     });
 
-    if (removed.length) {
-      attackInput.value = formatNumbers(kept.sort((a, b) => a - b));
-      removedGroups.push(`${attackInputLabel(attackInput)} ${removed.map(twoDigit).join(".")}`);
-    }
-  });
-
   return removedGroups;
+}
+
+function syncManualInputsToSelection(input = null) {
+  const numbers = manualInputElements(input).flatMap((item) => parseNumbers(item.value));
+  if (!numbers.length) return [];
+  state.autoRandomSelection = false;
+  numbers.forEach((num) => state.selectedNumbers.add(num));
+  return [...new Set(numbers)].sort((a, b) => a - b);
 }
 
 function pruneMissingAttackNotice(removedGroups) {
@@ -202,13 +211,7 @@ function attackInputHasCompleteNumber(input) {
 
 function scheduleAttackPrune(input) {
   clearTimeout(attackPruneTimer);
-  if (!isAttackInput(input) || !attackInputHasCompleteNumber(input)) return;
-  attackPruneTimer = setTimeout(() => {
-    const removedGroups = pruneMissingAttackNumbers(input);
-    if (!removedGroups.length) return;
-    refreshAfterInputChange();
-    setNotice(pruneMissingAttackNotice(removedGroups));
-  }, 520);
+  return;
 }
 
 function sameNumberList(left, right) {
@@ -217,15 +220,7 @@ function sameNumberList(left, right) {
 }
 
 function syncDefenseNumbers() {
-  if (!els.defenseNumbers) return;
-  const reserved = new Set([
-    ...parseNumbers(els.mainAttackNumbers.value),
-    ...parseNumbers(els.secondAttackNumbers.value),
-  ]);
-  const defense = [...state.selectedNumbers]
-    .filter((num) => !reserved.has(num))
-    .sort((a, b) => a - b);
-  els.defenseNumbers.value = formatNumbers(defense);
+  return;
 }
 
 function randInt(min, max) {
@@ -380,8 +375,14 @@ function canFinishWithLadder(groups, startIndex, remain, ladder, minStake, maxSt
   return remain >= minTotal && remain <= maxTotal;
 }
 
-function randomAmountSuffix() {
-  return randomItem(["", "", "元", "米"]);
+function randomAmountUnit() {
+  return randomItem(["", "元", "米"]);
+}
+
+function randomAmountSuffix(unit = null) {
+  const chosen = unit === null ? randomAmountUnit() : unit;
+  if (!chosen) return "";
+  return Math.random() < 0.75 ? chosen : "";
 }
 
 function lineText(numbers, each, prefix, cumulative = null) {
@@ -389,15 +390,22 @@ function lineText(numbers, each, prefix, cumulative = null) {
   const numberText = shuffleNumbers(numbers).map(twoDigit).join(separator);
   const total = numbers.length * each;
   const tag = prefix ? `${prefix} ` : "";
+  const amountUnit = randomAmountUnit();
   const tail = cumulative === null ? "" : `****   ${cumulative}`;
-  return `${tag}${numberText} 各${each}${randomAmountSuffix()}  总${total}${tail}`;
+  if (numbers.length === 1) {
+    return `${tag}${numberText}/${moneyText(each)}${randomAmountSuffix(amountUnit)}${tail}`;
+  }
+  return `${tag}${numberText} 各${each}${randomAmountSuffix(amountUnit)}  总${total}${amountUnit}${tail}`;
 }
 
-function compactLineText(line, prefix = "", suffix = "") {
+function compactLineText(line, prefix = "", suffix = "", amountUnit = null, singleNumberGroup = false) {
   const separator = randomItem(activeSeparators());
   const numberText = shuffleNumbers(line.numbers).map(twoDigit).join(separator);
   const tag = prefix ? `${prefix} ` : "";
-  return `${tag}${numberText} 各${moneyText(line.each)}${randomAmountSuffix()}${suffix}`;
+  if (singleNumberGroup && line.numbers.length === 1) {
+    return `${tag}${numberText}/${moneyText(line.each)}${randomAmountSuffix(amountUnit)}${suffix}`;
+  }
+  return `${tag}${numberText} 各${moneyText(line.each)}${randomAmountSuffix(amountUnit)}${suffix}`;
 }
 
 function currentGroupPrefix() {
@@ -548,14 +556,17 @@ function groupedLinesText(lines, preferredBlockSizes = null) {
   const blocks = buildDifferentAmountBlocks(lines, blockSizes);
 
   blocks.forEach((block) => {
+    const amountUnit = randomAmountUnit();
     const blockTotal = block.reduce((sum, line) => sum + line.numbers.length * line.each, 0);
+    const blockNumberCount = block.reduce((sum, line) => sum + line.numbers.length, 0);
+    const singleNumberGroup = blockNumberCount === 1;
     const displayLines = block.flatMap((line) => displayLinesForResult(line));
     block.length = displayLines.length;
 
     displayLines.forEach((line, lineIndex) => {
       const prefix = lineIndex === 0 ? groupPrefix : "";
-      const suffix = lineIndex === block.length - 1 ? `  总${moneyText(blockTotal)}` : "";
-      output.push(compactLineText(line, prefix, suffix));
+      const suffix = lineIndex === block.length - 1 && !singleNumberGroup ? `  总${moneyText(blockTotal)}${amountUnit}` : "";
+      output.push(compactLineText(line, prefix, suffix, amountUnit, singleNumberGroup));
     });
   });
 
@@ -952,6 +963,7 @@ function currentPlanSignature(candidates = activeCandidates()) {
     numberKey(candidates),
     numberKey(parseNumbers(els.mainAttackNumbers?.value || "")),
     numberKey(parseNumbers(els.secondAttackNumbers?.value || "")),
+    numberKey(parseNumbers(els.defenseNumbers?.value || "")),
     currentGroupCount(),
     currentBudget(),
     currentOdds(),
@@ -1507,8 +1519,13 @@ function makeTierPlan(candidates, prefixes) {
   const main = selectedManualNumbers("mainAttackNumbers", candidates);
   const mainSet = new Set(main);
   const second = selectedManualNumbers("secondAttackNumbers", candidates, mainSet);
-  const reserved = new Set([...main, ...second]);
-  const defense = candidates.filter((num) => !reserved.has(num));
+  const mainSecondSet = new Set([...main, ...second]);
+  const manualDefense = selectedManualNumbers("defenseNumbers", candidates, mainSecondSet);
+  const manualDefenseSet = new Set(manualDefense);
+  const defense = [
+    ...manualDefense,
+    ...candidates.filter((num) => !mainSecondSet.has(num) && !manualDefenseSet.has(num)),
+  ];
   const tiers = [
     { key: "defense", name: "防守", numbers: defense },
     { key: "second", name: "次攻", numbers: second },
@@ -1610,10 +1627,15 @@ function classifyManualOptimizedTiers(candidates) {
   const main = selectedManualNumbers("mainAttackNumbers", candidates);
   const mainSet = new Set(main);
   const second = selectedManualNumbers("secondAttackNumbers", candidates, mainSet);
-  if (!main.length && !second.length) return null;
+  const mainSecondSet = new Set([...main, ...second]);
+  const manualDefense = selectedManualNumbers("defenseNumbers", candidates, mainSecondSet);
+  if (!main.length && !second.length && !manualDefense.length) return null;
 
-  const reserved = new Set([...main, ...second]);
-  const defense = candidates.filter((num) => !reserved.has(num));
+  const manualDefenseSet = new Set(manualDefense);
+  const defense = [
+    ...manualDefense,
+    ...candidates.filter((num) => !mainSecondSet.has(num) && !manualDefenseSet.has(num)),
+  ];
   const tierByNumber = new Map();
   const tiers = [
     { key: "main", name: "A档 主攻", title: "手动主攻", numbers: main },
@@ -2908,6 +2930,7 @@ function bindEvents() {
 
   els.multiBtn.addEventListener("click", () => {
     if (!requireBudgetAmount()) return;
+    syncManualInputsToSelection();
     const removedGroups = pruneMissingAttackNumbers();
     const plan = canReuseCurrentPlan(state.lastPlan) ? state.lastPlan : makeOptimizedBettingPlan();
     if (!plan) return;
@@ -2952,14 +2975,22 @@ function bindEvents() {
 
   document.querySelectorAll("input").forEach((input) => {
     input.addEventListener("input", (event) => {
-      if (isAttackInput(input)) formatAttackInput(input, event);
+      if (isAttackInput(input)) {
+        formatAttackInput(input, event);
+        removeManualDuplicatesFromOtherInputs(input);
+        syncManualInputsToSelection(input);
+      }
       if (isSelectionFilterControl(input)) applySelectionFilters();
       refreshAfterInputChange();
       if (isAttackInput(input)) scheduleAttackPrune(input);
     });
     input.addEventListener("change", () => {
       let removedGroups = [];
-      if (isAttackInput(input)) finalizeAttackInput(input);
+      if (isAttackInput(input)) {
+        finalizeAttackInput(input);
+        removeManualDuplicatesFromOtherInputs(input);
+        syncManualInputsToSelection(input);
+      }
       if (isAttackInput(input)) removedGroups = pruneMissingAttackNumbers(input);
       if (isSelectionFilterControl(input)) {
         applySelectionFilters();
@@ -2971,6 +3002,9 @@ function bindEvents() {
     });
     input.addEventListener("blur", () => {
       if (!isAttackInput(input)) return;
+      finalizeAttackInput(input);
+      removeManualDuplicatesFromOtherInputs(input);
+      syncManualInputsToSelection(input);
       const removedGroups = pruneMissingAttackNumbers(input);
       if (!removedGroups.length) return;
       refreshAfterInputChange();

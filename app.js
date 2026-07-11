@@ -782,25 +782,27 @@ function renderManualProfitPanel(plan, force = false) {
   if (!els.manualProfitPanel) return;
 
   if (!state.selectedNumbers.size) {
-    els.manualProfitPanel.innerHTML = `<span class="profit-empty">选择号码后显示中奖利润</span>`;
+    els.manualProfitPanel.hidden = true;
+    els.manualProfitPanel.innerHTML = "";
     return;
   }
 
   if (!force) {
-    els.manualProfitPanel.innerHTML = state.hasGeneratedOutput
-      ? `<span class="profit-empty">点击“计算利润”查看每个号码中奖利润</span>`
-      : `<span class="profit-empty">生成结果后可计算中奖利润</span>`;
+    els.manualProfitPanel.hidden = true;
+    els.manualProfitPanel.innerHTML = "";
     return;
   }
 
   if (!plan || !plan.candidates?.length) {
-    els.manualProfitPanel.innerHTML = `<span class="profit-empty">生成分配后显示每个号码中奖利润</span>`;
+    els.manualProfitPanel.hidden = true;
+    els.manualProfitPanel.innerHTML = "";
     return;
   }
 
   const total = actualPlanTotal(plan);
   const odds = currentOdds();
   const candidateSet = new Set(plan.candidates);
+  els.manualProfitPanel.hidden = false;
 
   els.manualProfitPanel.innerHTML = MANUAL_GROUPS.map((group) => {
     const numbers = parseNumbers(els[group.input].value).filter((num) => candidateSet.has(num));

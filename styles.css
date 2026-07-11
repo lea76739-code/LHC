@@ -84,6 +84,10 @@ textarea:focus {
   box-shadow: 0 0 0 3px var(--accent-soft);
 }
 
+[hidden] {
+  display: none !important;
+}
+
 .app {
   display: grid;
   grid-template-columns: minmax(320px, 390px) minmax(0, 1fr);
@@ -433,6 +437,13 @@ textarea:focus {
 
 .mobile-profit-panel {
   display: none;
+}
+
+.profit-dock {
+  grid-column: 1 / -1;
+  align-self: start;
+  min-height: 300px;
+  margin-top: -2px;
 }
 
 .manual-profit-section {

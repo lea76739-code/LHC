@@ -4,7 +4,7 @@
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>CountPlus</title>
-    <link rel="stylesheet" href="./styles.css?v=mobile-profit-46">
+    <link rel="stylesheet" href="./styles.css?v=profit-dock-47">
   </head>
   <body>
     <main class="app">
@@ -37,7 +37,6 @@
               <input id="defenseNumbers" type="text" inputmode="numeric" readonly>
               <output id="defenseStatus"></output>
             </label>
-            <div id="manualProfitPanel" class="manual-profit-panel" aria-live="polite"></div>
           </div>
         </section>
       </aside>
@@ -129,7 +128,6 @@
           </div>
           <div id="allocationPanel" class="allocation-panel" hidden></div>
           <textarea id="resultOutput" spellcheck="false"></textarea>
-          <div id="mobileProfitPanel" class="manual-profit-panel mobile-profit-panel" aria-live="polite"></div>
           <div id="dataPanel" class="data-panel" hidden></div>
           <div class="status">
             <span id="totalText">总分配: 0</span>
@@ -138,6 +136,7 @@
           </div>
         </section>
       </section>
+      <div id="manualProfitPanel" class="manual-profit-panel profit-dock" aria-live="polite" hidden></div>
     </main>
 
     <div id="randomDialog" class="dialog-backdrop" hidden>
@@ -154,6 +153,6 @@
       </div>
     </div>
 
-    <script src="./app.js?v=budget-guard-95"></script>
+    <script src="./app.js?v=profit-dock-96"></script>
   </body>
 </html>

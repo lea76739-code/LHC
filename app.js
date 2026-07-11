@@ -948,6 +948,8 @@ function currentPlanSignature(candidates = activeCandidates()) {
   const { minPick, maxPick } = pickRange(Math.max(1, candidates.length || 49));
   return [
     numberKey(candidates),
+    numberKey(parseNumbers(els.mainAttackNumbers?.value || "")),
+    numberKey(parseNumbers(els.secondAttackNumbers?.value || "")),
     currentGroupCount(),
     currentBudget(),
     currentOdds(),
@@ -1019,6 +1021,7 @@ function promptRandomSelection() {
   els.pickCount.value = maxPick;
   state.selectedNumbers = new Set(sampleUnique(source, count));
   state.autoRandomSelection = false;
+  pruneMissingAttackNumbers();
   refreshAfterChange();
   setNotice(`已随机生成 ${count} 个号码（范围 ${minPick}-${maxPick}）`);
 }
@@ -1037,6 +1040,7 @@ function randomSelectionNow() {
   const count = randInt(minPick, maxPick);
   state.selectedNumbers = new Set(sampleUnique(source, count));
   state.autoRandomSelection = false;
+  pruneMissingAttackNumbers();
   refreshAfterChange();
   setNotice(`已随机生成 ${count} 个号码（范围 ${minPick}-${maxPick}）`);
 }
@@ -1066,6 +1070,7 @@ function promptRandomCountSelection() {
   els.pickCount.value = maxPick;
   state.selectedNumbers = new Set(sampleUnique(source, count));
   state.autoRandomSelection = false;
+  pruneMissingAttackNumbers();
   refreshAfterChange();
   setNotice(minPick === maxPick ? `已随机生成 ${count} 个号码` : `已随机生成 ${count} 个号码（范围 ${minPick}-${maxPick}）`);
 }
@@ -1108,6 +1113,7 @@ function confirmRandomDialog() {
   state.selectedNumbers = new Set(sampleUnique(source, count));
   state.autoRandomSelection = false;
   hideRandomDialog();
+  pruneMissingAttackNumbers();
   refreshAfterChange();
   setNotice(minPick === maxPick ? `已随机生成 ${count} 个号码` : `已随机生成 ${count} 个号码（范围 ${minPick}-${maxPick}）`);
 }
@@ -1562,6 +1568,10 @@ function optimizationTolerance(total) {
 
 function totalOverageTolerance(total) {
   return 300;
+}
+
+function maxAllowedPlanTotal(total) {
+  return total + totalOverageTolerance(total);
 }
 
 function totalBudgetMiss(currentTotal, targetTotal) {
@@ -2167,6 +2177,35 @@ function ensureProtectedProfitByTopUp(lines, candidates, odds, tiers) {
   };
 }
 
+function cloneLines(lines) {
+  return lines.map((line) => ({
+    ...line,
+    numbers: line.numbers.slice(),
+  }));
+}
+
+function replaceLines(target, source) {
+  target.splice(0, target.length, ...cloneLines(source));
+}
+
+function emptyTopUpPlan(candidates, tiers, odds, skippedBudgetGuard = false) {
+  const protectedNumbers = profitProtectionOrder(candidates, tiers, odds);
+  return {
+    topUpTotal: 0,
+    protectedNumbers,
+    protectedCount: protectedNumbers.length,
+    unprotectedCount: Math.max(0, candidates.length - protectedNumbers.length),
+    stillLosingProtected: [],
+    skippedBudgetGuard,
+  };
+}
+
+function keepProtectedLinesIfBudgetAllows(lines, protectedLines, targetTotal) {
+  if (planTotalFromLines(protectedLines) > maxAllowedPlanTotal(targetTotal)) return false;
+  replaceLines(lines, protectedLines);
+  return true;
+}
+
 function optimizedFinalCheck(candidates, allocations, total, odds, tiers) {
   const profits = Object.fromEntries(candidates.map((num) => [num, (allocations[num] || 0) * odds - total]));
   const losingNumbers = candidates.filter((num) => profits[num] <= 0);
@@ -2204,7 +2243,11 @@ function makeManualOptimizedBettingPlan(candidates, manualTiers, total, odds, pr
   const outputBlockSizes = randomBlockSizes(outputGroupCount);
   const desiredLineCount = blockSizesTotal(outputBlockSizes);
   const lines = tierLinesFromAllocationsExact(tierPriorityForTargets(manualTiers), targetPlan.targets, prefixes, desiredLineCount);
-  const topUpPlan = ensureProtectedProfitByTopUp(lines, candidates, odds, manualTiers);
+  const protectedLines = cloneLines(lines);
+  const candidateTopUpPlan = ensureProtectedProfitByTopUp(protectedLines, candidates, odds, manualTiers);
+  const topUpPlan = keepProtectedLinesIfBudgetAllows(lines, protectedLines, total)
+    ? candidateTopUpPlan
+    : emptyTopUpPlan(candidates, manualTiers, odds, true);
   const allocations = applyLineAllocations(lines, candidates);
   const actualTotal = planTotalFromLines(lines);
   const normalizedOutputBlockSizes = normalizeBlockSizes(lines.length, outputGroupCount, outputBlockSizes);
@@ -2266,9 +2309,18 @@ function makeOptimizedBettingPlan() {
   const lines = seedOptimizedLines(basePlan.lines, targetPlan.targets);
 
   adjustOptimizedTotal(lines, candidates, total, tierByNumber, targetPlan.safeMinimum);
-  ensureOptimizedProfit(lines, candidates, total, odds, tierByNumber);
-  adjustOptimizedTotal(lines, candidates, total, tierByNumber, targetPlan.safeMinimum);
-  const topUpPlan = ensureProtectedProfitByTopUp(lines, candidates, odds, tiers);
+  let topUpPlan = emptyTopUpPlan(candidates, tiers, odds, true);
+  if (planTotalFromLines(lines) > maxAllowedPlanTotal(total)) {
+    replaceLines(lines, basePlan.lines);
+  } else {
+    const protectedLines = cloneLines(lines);
+    ensureOptimizedProfit(protectedLines, candidates, total, odds, tierByNumber);
+    adjustOptimizedTotal(protectedLines, candidates, total, tierByNumber, targetPlan.safeMinimum);
+    const candidateTopUpPlan = ensureProtectedProfitByTopUp(protectedLines, candidates, odds, tiers);
+    topUpPlan = keepProtectedLinesIfBudgetAllows(lines, protectedLines, total)
+      ? candidateTopUpPlan
+      : emptyTopUpPlan(candidates, tiers, odds, true);
+  }
   refreshLineTotals(lines, prefixes);
 
   const allocations = applyLineAllocations(lines, candidates);
@@ -2501,7 +2553,7 @@ function amountSplitLinesFromPlan(plan) {
   if (!plan?.allocations || !plan?.candidates?.length) return plan?.lines || [];
 
   const remaining = Object.fromEntries(
-    plan.candidates.map((num) => [num, Math.max(0, roundedStakeUnit(plan.allocations[num] || 0))])
+    plan.candidates.map((num) => [num, Math.max(0, Math.round(plan.allocations[num] || 0))])
   );
   const lines = [];
   let guard = 0;
@@ -2802,12 +2854,14 @@ function bindEvents() {
   els.selectAll.addEventListener("click", () => {
     state.autoRandomSelection = false;
     state.selectedNumbers = new Set(Array.from({ length: 49 }, (_, index) => index + 1));
+    pruneMissingAttackNumbers();
     refreshAfterChange();
   });
 
   els.selectNone.addEventListener("click", () => {
     state.autoRandomSelection = false;
     state.selectedNumbers.clear();
+    pruneMissingAttackNumbers();
     refreshAfterChange();
   });
 
@@ -2818,6 +2872,7 @@ function bindEvents() {
       if (!state.selectedNumbers.has(num)) next.add(num);
     }
     state.selectedNumbers = next;
+    pruneMissingAttackNumbers();
     refreshAfterChange();
   });
 
